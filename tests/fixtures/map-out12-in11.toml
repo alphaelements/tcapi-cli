@@ -1,0 +1,13 @@
+version = 1
+
+[output]
+base = 0
+count = 12
+default = 0
+polarity = 0
+
+[input]
+base = 12
+count = 11
+pull = "up"
+timestamp = true
