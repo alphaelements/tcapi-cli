@@ -1,0 +1,10 @@
+stages:
+  - check
+
+check:
+  stage: check
+  image: rust:latest
+  script:
+    - cargo fmt --all -- --check
+    - cargo clippy -- -D warnings
+    - cargo test
