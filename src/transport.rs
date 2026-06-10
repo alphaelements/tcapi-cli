@@ -114,6 +114,61 @@ pub fn send_command_raw(
     }
 }
 
+/// Send a command whose response is `OK count=N` followed by N detail
+/// lines (e.g. `ts get`). Returns all lines including the OK line.
+pub fn send_command_counted(
+    port: &mut Box<dyn serialport::SerialPort>,
+    cmd: &str,
+) -> Result<Vec<String>> {
+    let cmd_line = format!("{cmd}\r\n");
+    port.write_all(cmd_line.as_bytes())
+        .context("failed to write command")?;
+    port.flush().context("failed to flush")?;
+
+    let mut reader = BufReader::new(port.try_clone().context("failed to clone port")?);
+    let mut lines = Vec::new();
+    let mut remaining: Option<usize> = None;
+    loop {
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .context("failed to read response")?;
+        if line.is_empty() {
+            bail!("device disconnected");
+        }
+        let trimmed = line.trim_end_matches(['\r', '\n']).to_string();
+        lines.push(trimmed.clone());
+
+        match remaining {
+            None => {
+                if trimmed.starts_with("ERR ") {
+                    return Ok(lines);
+                }
+                if trimmed.starts_with("OK") {
+                    let count = parse_count_field(&trimmed).unwrap_or(0);
+                    if count == 0 {
+                        return Ok(lines);
+                    }
+                    remaining = Some(count);
+                }
+            }
+            Some(n) => {
+                if n <= 1 {
+                    return Ok(lines);
+                }
+                remaining = Some(n - 1);
+            }
+        }
+    }
+}
+
+fn parse_count_field(ok_line: &str) -> Option<usize> {
+    ok_line
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("count="))
+        .and_then(|v| v.parse().ok())
+}
+
 pub fn read_push_events(
     port: &mut Box<dyn serialport::SerialPort>,
 ) -> Result<impl Iterator<Item = Result<String>>> {

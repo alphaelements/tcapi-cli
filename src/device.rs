@@ -26,12 +26,14 @@ pub fn enumerate_ports() -> Result<Vec<String>> {
     let mut pochi_ports = Vec::new();
     for port in ports {
         if let SerialPortType::UsbPort(info) = &port.port_type {
+            // Accept the legacy "Tachyon" product string too: devices in
+            // the field may still run pre-rename firmware.
             if info.vid == POCHI_VID
                 && info.pid == POCHI_PID
                 && info
                     .product
                     .as_ref()
-                    .is_some_and(|p| p.starts_with("Pochi"))
+                    .is_some_and(|p| p.starts_with("Pochi") || p.starts_with("Tachyon"))
             {
                 pochi_ports.push(port.port_name);
             }

@@ -57,7 +57,10 @@ pub fn run_caps(selector: &DeviceSelector, json: bool) -> Result<()> {
         println!("Max DIO channels:  {}", parsed.max_dio);
         println!("Output channels:   {}", parsed.out_count);
         println!("Input channels:    {}", parsed.in_count);
-        println!("TS resolution:     {} ns", parsed.ts_resolution_ns);
+        println!(
+            "TS resolution:     {} ns (sub-µs phase step)",
+            parsed.ts_resolution_ns
+        );
         println!("Max pattern steps: {}", parsed.max_pattern_steps);
         println!("TS ring capacity:  {}", parsed.ts_ring_events);
         println!("Features:          {:#010x}", parsed.features);
