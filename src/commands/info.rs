@@ -120,7 +120,7 @@ pub fn run_devnum(selector: &DeviceSelector, value: &str, json: bool) -> Result<
 fn run_devnum_auto(json: bool) -> Result<()> {
     let devices = device::enumerate_devices()?;
     if devices.is_empty() {
-        bail!("no Tachyon devices found");
+        bail!("no Pochi-DIO devices found");
     }
 
     let mut used: std::collections::HashSet<u8> = std::collections::HashSet::new();

@@ -20,11 +20,11 @@ pub fn run_raw(selector: &DeviceSelector, text: &str, json: bool) -> Result<()> 
 
 pub fn run_interactive(selector: &DeviceSelector) -> Result<()> {
     let (_info, mut port) = device::open_device(selector)?;
-    println!("Tachyon interactive mode (type 'exit' or Ctrl+D to quit)");
+    println!("Pochi-DIO interactive mode (type 'exit' or Ctrl+D to quit)");
 
     let stdin = io::stdin();
     loop {
-        print!("tachyon> ");
+        print!("pochi> ");
         io::stdout().flush().context("failed to flush stdout")?;
 
         let mut input = String::new();

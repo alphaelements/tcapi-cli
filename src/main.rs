@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use std::process;
 
 #[derive(Parser)]
-#[command(name = "tachyon", version, about = "CLI tool for Tachyon DIO")]
+#[command(name = "pochi", version, about = "CLI tool for Pochi-DIO")]
 struct Cli {
     /// Output in JSON format
     #[arg(long, global = true)]
@@ -32,7 +32,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List connected Tachyon devices
+    /// List connected Pochi-DIO devices
     List,
 
     /// Get firmware version
@@ -220,7 +220,7 @@ fn main() {
             let code = if err_msg.contains("device error") {
                 1
             } else if err_msg.contains("failed to open")
-                || err_msg.contains("no Tachyon device")
+                || err_msg.contains("no Pochi-DIO device")
                 || err_msg.contains("disconnected")
             {
                 2

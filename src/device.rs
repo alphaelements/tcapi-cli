@@ -3,8 +3,8 @@ use serialport::SerialPortType;
 
 use crate::transport;
 
-const TACHYON_VID: u16 = 0x2E8A;
-const TACHYON_PID: u16 = 0x000A;
+const POCHI_VID: u16 = 0x2E8A;
+const POCHI_PID: u16 = 0x000A;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DeviceInfo {
@@ -23,21 +23,21 @@ pub struct DeviceSelector {
 
 pub fn enumerate_ports() -> Result<Vec<String>> {
     let ports = serialport::available_ports().context("failed to list serial ports")?;
-    let mut tachyon_ports = Vec::new();
+    let mut pochi_ports = Vec::new();
     for port in ports {
         if let SerialPortType::UsbPort(info) = &port.port_type {
-            if info.vid == TACHYON_VID
-                && info.pid == TACHYON_PID
+            if info.vid == POCHI_VID
+                && info.pid == POCHI_PID
                 && info
                     .product
                     .as_ref()
-                    .is_some_and(|p| p.starts_with("Tachyon"))
+                    .is_some_and(|p| p.starts_with("Pochi"))
             {
-                tachyon_ports.push(port.port_name);
+                pochi_ports.push(port.port_name);
             }
         }
     }
-    Ok(tachyon_ports)
+    Ok(pochi_ports)
 }
 
 pub fn enumerate_devices() -> Result<Vec<DeviceInfo>> {
@@ -117,7 +117,7 @@ pub fn select_device(devices: &[DeviceInfo], selector: &DeviceSelector) -> Resul
             .iter()
             .find(|d| d.port == *port)
             .cloned()
-            .with_context(|| format!("no Tachyon device on port {port}"));
+            .with_context(|| format!("no Pochi-DIO device on port {port}"));
     }
 
     if let Some(uid) = &selector.uid {
@@ -126,7 +126,7 @@ pub fn select_device(devices: &[DeviceInfo], selector: &DeviceSelector) -> Resul
             .iter()
             .find(|d| d.uid.to_uppercase() == uid_upper)
             .cloned()
-            .with_context(|| format!("no Tachyon device with UID {uid}"));
+            .with_context(|| format!("no Pochi-DIO device with UID {uid}"));
     }
 
     if let Some(num) = selector.device {
@@ -135,7 +135,7 @@ pub fn select_device(devices: &[DeviceInfo], selector: &DeviceSelector) -> Resul
             .filter(|d| d.device_number == Some(num))
             .collect();
         return match matches.len() {
-            0 => bail!("no Tachyon device with device number {num}"),
+            0 => bail!("no Pochi-DIO device with device number {num}"),
             1 => Ok(matches[0].clone()),
             _ => bail!(
                 "multiple devices with device number {num}; use --uid or --port to disambiguate"
@@ -144,9 +144,9 @@ pub fn select_device(devices: &[DeviceInfo], selector: &DeviceSelector) -> Resul
     }
 
     match devices.len() {
-        0 => bail!("no Tachyon device found"),
+        0 => bail!("no Pochi-DIO device found"),
         1 => Ok(devices[0].clone()),
-        n => bail!("{n} Tachyon devices found; specify --uid, --device, or --port"),
+        n => bail!("{n} Pochi-DIO devices found; specify --uid, --device, or --port"),
     }
 }
 

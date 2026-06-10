@@ -1,6 +1,6 @@
-# Tachyon CLI
+# Pochi CLI
 
-Cross-platform command-line tool for [Tachyon DIO](http://gitlab.home:8888/Ryoma.Shiegeyama/tachyon) — an RP2350-based high-speed digital I/O unit.
+Cross-platform command-line tool for [Pochi-DIO](http://gitlab.home:8888/apro/eda/pochi-dio) — an RP2350-based high-speed digital I/O unit.
 
 ## Features
 
@@ -17,39 +17,39 @@ Cross-platform command-line tool for [Tachyon DIO](http://gitlab.home:8888/Ryoma
 cargo install --path .
 
 # List connected devices
-tachyon list
+pochi list
 
 # Read input pins
-tachyon read
+pochi read
 
 # Get firmware version
-tachyon version
+pochi version
 
 # Send raw text command
-tachyon raw "help"
+pochi raw "help"
 ```
 
 ## Device Selection
 
 ```bash
 # Auto-detect (single device)
-tachyon version
+pochi version
 
 # By device number
-tachyon -d 1 version
+pochi -d 1 version
 
 # By UID (hardware-unique)
-tachyon -u D5B305543EC559BF version
+pochi -u D5B305543EC559BF version
 
 # By port path
-tachyon -p /dev/ttyACM1 version
+pochi -p /dev/ttyACM1 version
 ```
 
 ## Documentation
 
-- **User Guide**: [Wiki](http://gitlab.home:8888/Ryoma.Shiegeyama/tachyon-cli/-/wikis/home) (日本語 / English)
-- **Dev Spec**: [tachyon/docs/55-cli-spec.md](http://gitlab.home:8888/Ryoma.Shiegeyama/tachyon/-/blob/main/docs/55-cli-spec.md)
-- **FW Protocol**: [tachyon/docs/30-usb-protocol.md](http://gitlab.home:8888/Ryoma.Shiegeyama/tachyon/-/blob/main/docs/30-usb-protocol.md)
+- **User Guide**: [Wiki](http://gitlab.home:8888/apro/eda/pochi-cli/-/wikis/home) (日本語 / English)
+- **Dev Spec**: [pochi-dio/docs/55-cli-spec.md](http://gitlab.home:8888/apro/eda/pochi-dio/-/blob/main/docs/55-cli-spec.md)
+- **FW Protocol**: [pochi-dio/docs/30-usb-protocol.md](http://gitlab.home:8888/apro/eda/pochi-dio/-/blob/main/docs/30-usb-protocol.md)
 
 ## License
 

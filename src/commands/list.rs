@@ -12,7 +12,7 @@ pub fn run(json: bool) -> Result<()> {
     }
 
     if devices.is_empty() {
-        println!("No Tachyon devices found.");
+        println!("No Pochi-DIO devices found.");
         return Ok(());
     }
 
@@ -52,7 +52,7 @@ pub fn run(json: bool) -> Result<()> {
             "\nWarning: duplicate device numbers detected: {:?}",
             duplicates
         );
-        eprintln!("Use 'tachyon devnum auto' to assign unique numbers, or specify --uid/--port.");
+        eprintln!("Use 'pochi devnum auto' to assign unique numbers, or specify --uid/--port.");
     }
 
     Ok(())
