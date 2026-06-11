@@ -68,7 +68,7 @@ pub fn run_watch(selector: &DeviceSelector, json: bool) -> Result<()> {
     resp.ok_data()?;
 
     if !json {
-        println!("Watching for input changes (Ctrl+C to stop)...");
+        println!("Watching for device events (Ctrl+C to stop)...");
     }
 
     let ctrlc = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -85,11 +85,9 @@ pub fn run_watch(selector: &DeviceSelector, json: bool) -> Result<()> {
         }
         match event {
             Ok(data) => {
+                let parsed = parse_watch_event(&data);
                 if json {
-                    let parsed = parse_input_event(&data);
-                    if let Ok(ev) = parsed {
-                        let _ = output::print_json(&ev);
-                    }
+                    let _ = output::print_json(&parsed);
                 } else {
                     println!("{data}");
                 }
@@ -102,26 +100,51 @@ pub fn run_watch(selector: &DeviceSelector, json: bool) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Serialize)]
-pub struct InputEvent {
-    pub inputs: String,
-    pub timestamp: String,
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum WatchEvent {
+    Input { inputs: String, timestamp: String },
+    PatternDone { loops_done: u16 },
+    PatternTimeout { loops_done: u16 },
+    SyncClocking,
+    Unknown { raw: String },
 }
 
-fn parse_input_event(data: &str) -> Result<InputEvent> {
-    let mut inputs = String::new();
-    let mut timestamp = String::new();
-
-    let rest = data.strip_prefix("INPUT ").unwrap_or(data);
-    for part in rest.split_whitespace() {
-        if let Some(val) = part.strip_prefix("t=") {
-            timestamp = val.to_string();
-        } else if part.starts_with("0x") || part.starts_with("0X") {
-            inputs = part.to_string();
+pub fn parse_watch_event(data: &str) -> WatchEvent {
+    if let Some(rest) = data.strip_prefix("INPUT ") {
+        let mut inputs = String::new();
+        let mut timestamp = String::new();
+        for part in rest.split_whitespace() {
+            if let Some(val) = part.strip_prefix("t=") {
+                timestamp = val.to_string();
+            } else if part.starts_with("0x") || part.starts_with("0X") {
+                inputs = part.to_string();
+            }
+        }
+        return WatchEvent::Input { inputs, timestamp };
+    }
+    if let Some(rest) = data.strip_prefix("PATTERN_DONE ") {
+        if let Some(n) = parse_loops_field(rest) {
+            return WatchEvent::PatternDone { loops_done: n };
         }
     }
+    if let Some(rest) = data.strip_prefix("PATTERN_TIMEOUT ") {
+        if let Some(n) = parse_loops_field(rest) {
+            return WatchEvent::PatternTimeout { loops_done: n };
+        }
+    }
+    if data == "SYNC_CLOCKING" {
+        return WatchEvent::SyncClocking;
+    }
+    WatchEvent::Unknown {
+        raw: data.to_string(),
+    }
+}
 
-    Ok(InputEvent { inputs, timestamp })
+fn parse_loops_field(s: &str) -> Option<u16> {
+    s.split_whitespace()
+        .find_map(|part| part.strip_prefix("loops="))
+        .and_then(|v| v.parse().ok())
 }
 
 pub fn parse_state(data: &str) -> Result<StateResult> {
@@ -159,9 +182,54 @@ mod tests {
     }
 
     #[test]
-    fn parse_input_event_basic() {
-        let e = parse_input_event("INPUT 0x000005 t=1234567890").unwrap();
-        assert_eq!(e.inputs, "0x000005");
-        assert_eq!(e.timestamp, "1234567890");
+    fn parse_watch_event_input() {
+        let ev = parse_watch_event("INPUT 0x000005 t=1234567890");
+        assert_eq!(
+            ev,
+            WatchEvent::Input {
+                inputs: "0x000005".to_string(),
+                timestamp: "1234567890".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_watch_event_pattern_done() {
+        let ev = parse_watch_event("PATTERN_DONE loops=42");
+        assert_eq!(ev, WatchEvent::PatternDone { loops_done: 42 });
+    }
+
+    #[test]
+    fn parse_watch_event_pattern_timeout() {
+        let ev = parse_watch_event("PATTERN_TIMEOUT loops=3");
+        assert_eq!(ev, WatchEvent::PatternTimeout { loops_done: 3 });
+    }
+
+    #[test]
+    fn parse_watch_event_sync_clocking() {
+        let ev = parse_watch_event("SYNC_CLOCKING");
+        assert_eq!(ev, WatchEvent::SyncClocking);
+    }
+
+    #[test]
+    fn parse_watch_event_unknown_keeps_raw() {
+        let ev = parse_watch_event("FOO bar=1");
+        assert_eq!(
+            ev,
+            WatchEvent::Unknown {
+                raw: "FOO bar=1".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_watch_event_pattern_done_missing_loops_is_unknown() {
+        let ev = parse_watch_event("PATTERN_DONE garbage=1");
+        assert_eq!(
+            ev,
+            WatchEvent::Unknown {
+                raw: "PATTERN_DONE garbage=1".to_string(),
+            }
+        );
     }
 }

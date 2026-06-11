@@ -36,6 +36,7 @@ fn error_description(code: &str) -> String {
         "NO_RESOURCE" => {
             "no matching resource (e.g. write to input-only map, or read with no inputs)"
         }
+        "NOT_RUNNING" => "pattern is not running (stop only applies while a pattern is running)",
         "UNKNOWN_CMD" => "unknown text command",
         "LINE_TOO_LONG" => "command line exceeds 128 bytes",
         _ => return format!("ERR {code}"),
@@ -114,6 +115,61 @@ pub fn send_command_raw(
     }
 }
 
+/// Send a command whose response is `OK count=N` followed by N detail
+/// lines (e.g. `ts get`). Returns all lines including the OK line.
+pub fn send_command_counted(
+    port: &mut Box<dyn serialport::SerialPort>,
+    cmd: &str,
+) -> Result<Vec<String>> {
+    let cmd_line = format!("{cmd}\r\n");
+    port.write_all(cmd_line.as_bytes())
+        .context("failed to write command")?;
+    port.flush().context("failed to flush")?;
+
+    let mut reader = BufReader::new(port.try_clone().context("failed to clone port")?);
+    let mut lines = Vec::new();
+    let mut remaining: Option<usize> = None;
+    loop {
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .context("failed to read response")?;
+        if line.is_empty() {
+            bail!("device disconnected");
+        }
+        let trimmed = line.trim_end_matches(['\r', '\n']).to_string();
+        lines.push(trimmed.clone());
+
+        match remaining {
+            None => {
+                if trimmed.starts_with("ERR ") {
+                    return Ok(lines);
+                }
+                if trimmed.starts_with("OK") {
+                    let count = parse_count_field(&trimmed).unwrap_or(0);
+                    if count == 0 {
+                        return Ok(lines);
+                    }
+                    remaining = Some(count);
+                }
+            }
+            Some(n) => {
+                if n <= 1 {
+                    return Ok(lines);
+                }
+                remaining = Some(n - 1);
+            }
+        }
+    }
+}
+
+fn parse_count_field(ok_line: &str) -> Option<usize> {
+    ok_line
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("count="))
+        .and_then(|v| v.parse().ok())
+}
+
 pub fn read_push_events(
     port: &mut Box<dyn serialport::SerialPort>,
 ) -> Result<impl Iterator<Item = Result<String>>> {
@@ -175,5 +231,22 @@ mod tests {
     fn ok_data_err() {
         let resp = Response::Err("BAD_CMD".to_string());
         assert!(resp.ok_data().is_err());
+    }
+
+    #[test]
+    fn err_not_running_has_hint() {
+        let resp = Response::Err("NOT_RUNNING".to_string());
+        let err = resp.ok_data().unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("NOT_RUNNING"));
+        assert!(msg.contains("not running"));
+    }
+
+    #[test]
+    fn err_unknown_code_falls_back_to_raw() {
+        let resp = Response::Err("WAT_IS_THIS".to_string());
+        let err = resp.ok_data().unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("WAT_IS_THIS"));
     }
 }

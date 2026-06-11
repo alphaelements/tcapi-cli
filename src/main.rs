@@ -1,6 +1,7 @@
 mod commands;
 mod device;
 mod output;
+mod reconcile;
 mod toml_convert;
 mod transport;
 
@@ -97,6 +98,20 @@ enum Command {
         text: String,
     },
 
+    /// Soft-reset the device (USB re-enumerates after ~50 ms)
+    Reset {
+        /// Skip the interactive confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Reboot the device into BOOTSEL mode (USB Mass Storage for FW update)
+    Bootsel {
+        /// Skip the interactive confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
     /// Interactive REPL mode
     Interactive,
 }
@@ -146,6 +161,8 @@ enum PatternAction {
     Stop,
     /// Get pattern status
     Status,
+    /// Reset the pattern engine (stops SM/DMA, clears buffer, state=Idle)
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -162,6 +179,10 @@ enum TsAction {
         /// Maximum events to retrieve
         #[arg(default_value = "256")]
         max_events: u16,
+        /// Reconcile µs-boundary straddles across channels (groups events
+        /// by count proximity and corrects DMA latch inconsistencies)
+        #[arg(long)]
+        reconcile: bool,
     },
     /// Disarm timestamp capture
     Disarm,
@@ -193,6 +214,19 @@ enum SyncAction {
     Disarm,
     /// Run full sync session (auto: arm slaves, master, start, count, stop)
     Run,
+    /// Multi-device synchronized timestamp capture with reconcile
+    Capture {
+        /// Edge mask (hex, e.g. 0x3)
+        mask: String,
+        /// Edge mode: rising, falling, or both
+        mode: String,
+        /// Maximum events per device
+        #[arg(long, default_value = "256")]
+        events: u16,
+        /// Capture duration in seconds
+        #[arg(long, default_value = "5")]
+        duration: u64,
+    },
 }
 
 fn selector(cli: &Cli) -> device::DeviceSelector {
@@ -261,14 +295,16 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             } => commands::pattern::run_run(&sel, *loop_mode, *repeat, cli.json),
             PatternAction::Stop => commands::pattern::run_stop(&sel, cli.json),
             PatternAction::Status => commands::pattern::run_status(&sel, cli.json),
+            PatternAction::Reset => commands::pattern::run_reset(&sel, cli.json),
         },
         Command::Ts { action } => match action {
             TsAction::Arm { mask, mode } => {
                 commands::timestamp::run_arm(&sel, mask, mode, cli.json)
             }
-            TsAction::Get { max_events } => {
-                commands::timestamp::run_get(&sel, *max_events, cli.json)
-            }
+            TsAction::Get {
+                max_events,
+                reconcile,
+            } => commands::timestamp::run_get(&sel, *max_events, *reconcile, cli.json),
             TsAction::Disarm => commands::timestamp::run_disarm(&sel, cli.json),
             TsAction::Capture {
                 mask,
@@ -284,8 +320,16 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             SyncAction::Count => commands::sync::run_count(&sel, cli.json),
             SyncAction::Disarm => commands::sync::run_disarm(&sel, cli.json),
             SyncAction::Run => commands::sync::run_sync_session(&sel, cli.json),
+            SyncAction::Capture {
+                mask,
+                mode,
+                events,
+                duration,
+            } => commands::sync::run_sync_capture(&sel, mask, mode, *events, *duration, cli.json),
         },
         Command::Raw { text } => commands::raw::run_raw(&sel, text, cli.json),
+        Command::Reset { yes } => commands::reset::run_system_reset(&sel, *yes, cli.json),
+        Command::Bootsel { yes } => commands::reset::run_bootsel(&sel, *yes, cli.json),
         Command::Interactive => commands::raw::run_interactive(&sel),
     }
 }

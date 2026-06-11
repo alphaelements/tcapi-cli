@@ -64,6 +64,19 @@ pub fn run_stop(selector: &DeviceSelector, json: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn run_reset(selector: &DeviceSelector, json: bool) -> Result<()> {
+    let (_info, mut port) = device::open_device(selector)?;
+    let resp = transport::send_command(&mut port, "pattern reset")?;
+    resp.ok_data()?;
+
+    if json {
+        output::print_json(&serde_json::json!({"status": "ok"}))?;
+    } else {
+        println!("Pattern engine reset.");
+    }
+    Ok(())
+}
+
 pub fn run_status(selector: &DeviceSelector, json: bool) -> Result<()> {
     let (_info, mut port) = device::open_device(selector)?;
     let resp = transport::send_command(&mut port, "pattern status")?;
