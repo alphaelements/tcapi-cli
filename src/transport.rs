@@ -36,6 +36,7 @@ fn error_description(code: &str) -> String {
         "NO_RESOURCE" => {
             "no matching resource (e.g. write to input-only map, or read with no inputs)"
         }
+        "NOT_RUNNING" => "pattern is not running (stop only applies while a pattern is running)",
         "UNKNOWN_CMD" => "unknown text command",
         "LINE_TOO_LONG" => "command line exceeds 128 bytes",
         _ => return format!("ERR {code}"),
@@ -230,5 +231,22 @@ mod tests {
     fn ok_data_err() {
         let resp = Response::Err("BAD_CMD".to_string());
         assert!(resp.ok_data().is_err());
+    }
+
+    #[test]
+    fn err_not_running_has_hint() {
+        let resp = Response::Err("NOT_RUNNING".to_string());
+        let err = resp.ok_data().unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("NOT_RUNNING"));
+        assert!(msg.contains("not running"));
+    }
+
+    #[test]
+    fn err_unknown_code_falls_back_to_raw() {
+        let resp = Response::Err("WAT_IS_THIS".to_string());
+        let err = resp.ok_data().unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("WAT_IS_THIS"));
     }
 }

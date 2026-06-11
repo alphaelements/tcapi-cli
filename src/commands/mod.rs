@@ -4,5 +4,6 @@ pub mod list;
 pub mod map;
 pub mod pattern;
 pub mod raw;
+pub mod reset;
 pub mod sync;
 pub mod timestamp;

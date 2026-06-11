@@ -5,6 +5,9 @@ use crate::device::{self, DeviceSelector};
 use crate::output;
 use crate::transport;
 
+pub const FEAT_SYNC: u32 = 0x0000_0001;
+pub const FEAT_RESET: u32 = 0x0000_0002;
+
 #[derive(Debug, Serialize)]
 pub struct VersionInfo {
     pub firmware: String,
@@ -21,6 +24,27 @@ pub struct CapsInfo {
     pub max_pattern_steps: u16,
     pub ts_ring_events: u16,
     pub features: u32,
+}
+
+impl CapsInfo {
+    pub fn has_sync(&self) -> bool {
+        self.features & FEAT_SYNC != 0
+    }
+
+    pub fn has_reset(&self) -> bool {
+        self.features & FEAT_RESET != 0
+    }
+
+    pub fn feature_labels(&self) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        if self.has_sync() {
+            labels.push("sync");
+        }
+        if self.has_reset() {
+            labels.push("reset");
+        }
+        labels
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -63,7 +87,16 @@ pub fn run_caps(selector: &DeviceSelector, json: bool) -> Result<()> {
         );
         println!("Max pattern steps: {}", parsed.max_pattern_steps);
         println!("TS ring capacity:  {}", parsed.ts_ring_events);
-        println!("Features:          {:#010x}", parsed.features);
+        let labels = parsed.feature_labels();
+        if labels.is_empty() {
+            println!("Features:          {:#010x}", parsed.features);
+        } else {
+            println!(
+                "Features:          {:#010x} ({})",
+                parsed.features,
+                labels.join(", ")
+            );
+        }
     }
     Ok(())
 }
@@ -303,6 +336,30 @@ mod tests {
             .unwrap();
         assert_eq!(c.out_count, 0);
         assert_eq!(c.in_count, 23);
+    }
+
+    #[test]
+    fn caps_feature_helpers() {
+        let only_sync =
+            parse_caps("dio=23 out=0 in=23 ts_res=40ns pattern=256 ring=256 feat=0x00000001")
+                .unwrap();
+        assert!(only_sync.has_sync());
+        assert!(!only_sync.has_reset());
+        assert_eq!(only_sync.feature_labels(), vec!["sync"]);
+
+        let sync_and_reset =
+            parse_caps("dio=23 out=0 in=23 ts_res=40ns pattern=256 ring=256 feat=0x00000003")
+                .unwrap();
+        assert!(sync_and_reset.has_sync());
+        assert!(sync_and_reset.has_reset());
+        assert_eq!(sync_and_reset.feature_labels(), vec!["sync", "reset"]);
+
+        let none =
+            parse_caps("dio=23 out=0 in=23 ts_res=40ns pattern=256 ring=256 feat=0x00000000")
+                .unwrap();
+        assert!(!none.has_sync());
+        assert!(!none.has_reset());
+        assert!(none.feature_labels().is_empty());
     }
 
     #[test]

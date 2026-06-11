@@ -98,6 +98,20 @@ enum Command {
         text: String,
     },
 
+    /// Soft-reset the device (USB re-enumerates after ~50 ms)
+    Reset {
+        /// Skip the interactive confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
+    /// Reboot the device into BOOTSEL mode (USB Mass Storage for FW update)
+    Bootsel {
+        /// Skip the interactive confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+
     /// Interactive REPL mode
     Interactive,
 }
@@ -147,6 +161,8 @@ enum PatternAction {
     Stop,
     /// Get pattern status
     Status,
+    /// Reset the pattern engine (stops SM/DMA, clears buffer, state=Idle)
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -279,6 +295,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             } => commands::pattern::run_run(&sel, *loop_mode, *repeat, cli.json),
             PatternAction::Stop => commands::pattern::run_stop(&sel, cli.json),
             PatternAction::Status => commands::pattern::run_status(&sel, cli.json),
+            PatternAction::Reset => commands::pattern::run_reset(&sel, cli.json),
         },
         Command::Ts { action } => match action {
             TsAction::Arm { mask, mode } => {
@@ -311,6 +328,8 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             } => commands::sync::run_sync_capture(&sel, mask, mode, *events, *duration, cli.json),
         },
         Command::Raw { text } => commands::raw::run_raw(&sel, text, cli.json),
+        Command::Reset { yes } => commands::reset::run_system_reset(&sel, *yes, cli.json),
+        Command::Bootsel { yes } => commands::reset::run_bootsel(&sel, *yes, cli.json),
         Command::Interactive => commands::raw::run_interactive(&sel),
     }
 }
