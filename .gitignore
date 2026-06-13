@@ -4,6 +4,7 @@
 *~
 .DS_Store
 tmp/
+.handoff/
 /wiki/
 CLAUDE.md
 .claude/
