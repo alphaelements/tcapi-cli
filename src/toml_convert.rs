@@ -1,12 +1,17 @@
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
+/// Every valid DIO pin bit: GP0-22 (ch0-22), GP26 (ch23), GP27 (ch24).
+/// Mirrors FW's `VALID_DIO_MASK` (design doc §2.2).
+const VALID_DIO_MASK: u32 = 0x0C7F_FFFF;
+
 #[derive(Debug, Deserialize)]
 struct MapConfig {
-    #[allow(dead_code)]
     version: Option<u8>,
     output: Option<MapOutputConfig>,
     input: Option<MapInputConfig>,
+    direction_mask: Option<String>,
+    options: Option<MapV2Options>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,9 +30,22 @@ struct MapInputConfig {
     timestamp: Option<bool>,
 }
 
+/// `[options]` table for v2 map TOML (design doc §3 D3).
+#[derive(Debug, Deserialize, Default)]
+struct MapV2Options {
+    flags: Option<u8>,
+}
+
 pub fn map_toml_to_hex(toml_str: &str) -> Result<String> {
     let config: MapConfig = toml::from_str(toml_str).context("failed to parse map TOML")?;
 
+    match config.version {
+        Some(2) => map_v2_to_hex(&config),
+        _ => map_v1_to_hex(&config),
+    }
+}
+
+fn map_v1_to_hex(config: &MapConfig) -> Result<String> {
     let mut buf = [0u8; 24];
     buf[0] = 1; // version
 
@@ -59,6 +77,52 @@ pub fn map_toml_to_hex(toml_str: &str) -> Result<String> {
     }
 
     Ok(hex::encode(buf))
+}
+
+/// Converts a v2 map TOML (`version = 2`, `direction_mask = "0x..."`) into
+/// the 32B `PinMapV2` hex payload for `map set`.
+///
+/// Defaults for fields not specified in TOML match FW's
+/// `parse_map_set_v2()` exactly (design doc §9 R-05):
+/// - `pull_up_mask` = 0
+/// - `pull_down_mask` = `!direction_mask & VALID_DIO_MASK`
+/// - `out_default` = 0
+/// - `out_polarity` = 0
+/// - `in_polarity` = 0
+/// - `edge_mask` = `!direction_mask & VALID_DIO_MASK`
+fn map_v2_to_hex(config: &MapConfig) -> Result<String> {
+    let mask_str = config
+        .direction_mask
+        .as_deref()
+        .context("v2 map TOML requires 'direction_mask'")?;
+    let direction_mask = parse_hex_u32(mask_str).context("invalid direction_mask")?;
+
+    let flags = config.options.as_ref().and_then(|o| o.flags).unwrap_or(0);
+
+    let pull_down_mask = !direction_mask & VALID_DIO_MASK;
+    let edge_mask = !direction_mask & VALID_DIO_MASK;
+
+    let mut buf = [0u8; 32];
+    buf[0] = 2; // version
+    buf[1] = flags;
+    // buf[2..4] reserved = 0
+    buf[4..8].copy_from_slice(&direction_mask.to_le_bytes());
+    // buf[8..12] pull_up_mask = 0
+    buf[12..16].copy_from_slice(&pull_down_mask.to_le_bytes());
+    // buf[16..20] out_default = 0
+    // buf[20..24] out_polarity = 0
+    // buf[24..28] in_polarity = 0
+    buf[28..32].copy_from_slice(&edge_mask.to_le_bytes());
+
+    Ok(hex::encode(buf))
+}
+
+fn parse_hex_u32(s: &str) -> Result<u32> {
+    let digits = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"));
+    match digits {
+        Some(digits) => u32::from_str_radix(digits, 16).context("invalid hex value"),
+        None => s.parse::<u32>().context("invalid numeric value"),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -205,6 +269,96 @@ timestamp = true
         assert_eq!(bytes[3], 12); // in_base
         assert_eq!(bytes[4], 11); // in_count
         assert_eq!(bytes[5], 1); // pull = up
+    }
+
+    #[test]
+    fn map_v2_basic() {
+        let toml = r#"
+version = 2
+direction_mask = "0x00000FFF"
+
+[options]
+flags = 0
+"#;
+        let hex = map_toml_to_hex(toml).unwrap();
+        assert_eq!(hex.len(), 64); // 32 bytes = 64 hex chars
+        let bytes = hex::decode(&hex).unwrap();
+        assert_eq!(bytes[0], 2); // version
+        assert_eq!(bytes[1], 0); // flags
+        assert_eq!(bytes[2], 0); // reserved
+        assert_eq!(bytes[3], 0); // reserved
+        let direction_mask = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        assert_eq!(direction_mask, 0x0000_0FFF);
+        let pull_up = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+        assert_eq!(pull_up, 0);
+        let pull_down = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+        assert_eq!(pull_down, VALID_DIO_MASK & !0x0000_0FFF);
+        let out_default = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
+        assert_eq!(out_default, 0);
+        let out_polarity = u32::from_le_bytes(bytes[20..24].try_into().unwrap());
+        assert_eq!(out_polarity, 0);
+        let in_polarity = u32::from_le_bytes(bytes[24..28].try_into().unwrap());
+        assert_eq!(in_polarity, 0);
+        let edge_mask = u32::from_le_bytes(bytes[28..32].try_into().unwrap());
+        assert_eq!(edge_mask, VALID_DIO_MASK & !0x0000_0FFF);
+    }
+
+    #[test]
+    fn map_v2_flags_option() {
+        let toml = r#"
+version = 2
+direction_mask = "0x00000001"
+
+[options]
+flags = 3
+"#;
+        let hex = map_toml_to_hex(toml).unwrap();
+        let bytes = hex::decode(&hex).unwrap();
+        assert_eq!(bytes[1], 3);
+    }
+
+    #[test]
+    fn map_v2_all_output() {
+        let toml = r#"
+version = 2
+direction_mask = "0x0C7FFFFF"
+"#;
+        let hex = map_toml_to_hex(toml).unwrap();
+        let bytes = hex::decode(&hex).unwrap();
+        let direction_mask = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        assert_eq!(direction_mask, VALID_DIO_MASK);
+        let pull_down = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+        assert_eq!(pull_down, 0); // all output -> nothing left to pull down
+    }
+
+    #[test]
+    fn map_v2_all_input() {
+        let toml = r#"
+version = 2
+direction_mask = "0x00000000"
+"#;
+        let hex = map_toml_to_hex(toml).unwrap();
+        let bytes = hex::decode(&hex).unwrap();
+        let pull_down = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+        assert_eq!(pull_down, VALID_DIO_MASK);
+    }
+
+    #[test]
+    fn map_v2_missing_direction_mask_errors() {
+        let toml = r#"
+version = 2
+"#;
+        let err = map_toml_to_hex(toml).unwrap_err();
+        assert!(err.to_string().contains("direction_mask"));
+    }
+
+    #[test]
+    fn map_v2_malformed_direction_mask_errors() {
+        let toml = r#"
+version = 2
+direction_mask = "not-hex"
+"#;
+        assert!(map_toml_to_hex(toml).is_err());
     }
 
     #[test]

@@ -170,6 +170,76 @@ fn parse_count_field(ok_line: &str) -> Option<usize> {
         .and_then(|v| v.parse().ok())
 }
 
+/// Number of `chN: OUT`/`chN: IN` detail lines that follow a v2 `map get`
+/// header (ch0..ch24). See design doc §2.4 and §9 R-06.
+const MAP_V2_CHANNEL_LINES: usize = 25;
+
+/// Parses the `v=` field out of a `map get` OK header line's data payload.
+/// Returns `None` when absent (treated as v1 for backward compat, matching
+/// `commands::map::parse_map_response`'s default).
+fn parse_map_version_field(ok_data: &str) -> Option<u8> {
+    ok_data
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("v="))
+        .and_then(|v| v.parse().ok())
+}
+
+/// Sends `map get` and reads its response using a single `BufReader`.
+///
+/// The v2 firmware embeds 25 `chN: OUT`/`chN: IN` detail lines after the
+/// `OK v=2 ...` header, in the *same* response burst. A fresh `BufReader`
+/// per read (as `send_command` does) would risk losing buffered bytes
+/// between the header read and the detail-line reads, so this function
+/// reads header + detail lines from one `BufReader` (design doc §9 R-02+R-03).
+///
+/// Returns `(header_response, channel_lines)`. `channel_lines` is `Some`
+/// (with exactly [`MAP_V2_CHANNEL_LINES`] entries) only when the header
+/// reports `v=2`; it is `None` for v1 responses or error responses.
+pub fn send_command_map_get(
+    port: &mut Box<dyn serialport::SerialPort>,
+) -> Result<(Response, Option<Vec<String>>)> {
+    let cmd_line = "map get\r\n";
+    port.write_all(cmd_line.as_bytes())
+        .context("failed to write command")?;
+    port.flush().context("failed to flush")?;
+
+    let mut reader = BufReader::new(port.try_clone().context("failed to clone port")?);
+
+    let header = loop {
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .context("failed to read response")?;
+        if line.is_empty() {
+            bail!("device disconnected");
+        }
+        let resp = parse_response(&line)?;
+        match resp {
+            Response::Push(_) => continue,
+            other => break other,
+        }
+    };
+
+    let is_v2 = matches!(&header, Response::Ok(data) if parse_map_version_field(data) == Some(2));
+    if !is_v2 {
+        return Ok((header, None));
+    }
+
+    let mut channel_lines = Vec::with_capacity(MAP_V2_CHANNEL_LINES);
+    for _ in 0..MAP_V2_CHANNEL_LINES {
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .context("failed to read map channel line")?;
+        if line.is_empty() {
+            bail!("device disconnected while reading map channel lines");
+        }
+        channel_lines.push(line.trim_end_matches(['\r', '\n']).to_string());
+    }
+
+    Ok((header, Some(channel_lines)))
+}
+
 pub fn read_push_events(
     port: &mut Box<dyn serialport::SerialPort>,
 ) -> Result<impl Iterator<Item = Result<String>>> {
@@ -205,6 +275,27 @@ mod tests {
     fn parse_err() {
         let resp = parse_response("ERR BAD_CMD\r\n").unwrap();
         assert_eq!(resp, Response::Err("BAD_CMD".to_string()));
+    }
+
+    #[test]
+    fn map_version_field_v2() {
+        assert_eq!(
+            parse_map_version_field("v=2 out=4 in=21 flags=0x01"),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn map_version_field_v1() {
+        assert_eq!(
+            parse_map_version_field("v=1 out=0:12 in=12:11 pull=up flags=0x01"),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn map_version_field_missing() {
+        assert_eq!(parse_map_version_field("out=4 in=21"), None);
     }
 
     #[test]
