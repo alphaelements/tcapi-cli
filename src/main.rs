@@ -120,7 +120,7 @@ enum Command {
 enum MapAction {
     /// Show current pin map
     Show,
-    /// Set pin map from hex string (48 hex chars = 24 bytes)
+    /// Set pin map from hex string (48 or 64 hex chars = 24 or 32 bytes)
     Set {
         /// Map data as hex string
         hex: String,
@@ -132,7 +132,7 @@ enum MapAction {
     },
     /// Save current map to flash
     Save,
-    /// Load default map (all 23 channels input)
+    /// Load default map (all 25 channels input)
     Default,
 }
 
