@@ -1,7 +1,0 @@
-version = 1
-
-[input]
-base = 0
-count = 23
-pull = "down"
-timestamp = true

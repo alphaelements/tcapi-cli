@@ -1,8 +1,0 @@
-version = 1
-unit = "us"
-steps = [
-  { out = 1, hold = 100 },
-  { out = 2, hold = 100 },
-  { out = 4, hold = 50 },
-  { out = 0, hold = 200 },
-]

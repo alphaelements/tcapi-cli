@@ -402,11 +402,22 @@ dependencies = [
  "assert_cmd",
  "clap",
  "ctrlc",
- "hex",
+ "pochi-sdk",
  "predicates",
  "serde",
  "serde_json",
  "serialport",
+]
+
+[[package]]
+name = "pochi-sdk"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "serialport",
+ "thiserror",
  "toml",
 ]
 

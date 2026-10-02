@@ -1,235 +1,312 @@
+use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use anyhow::{Context, Result};
-use serde::Serialize;
+use pochi_sdk::{Connection, PushEvent, SdkError};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
-use crate::transport;
+use crate::parse::parse_u32;
 
-#[derive(Debug, Serialize)]
-pub struct ReadResult {
-    pub inputs: String,
-}
+/// How often the watch loop checks the Ctrl+C flag while no event arrives.
+const WATCH_POLL: Duration = Duration::from_millis(100);
 
-#[derive(Debug, Serialize)]
-pub struct StateResult {
-    pub inputs: String,
-    pub outputs: String,
-    pub flags: String,
-}
+/// Idle time after which `watch` pings the device to notice an unplug.
+pub const WATCH_HEARTBEAT: Duration = Duration::from_secs(2);
+
+/// Value echoed by the watch heartbeat `ping`.
+const WATCH_PING_VALUE: u32 = 0;
 
 pub fn run_read(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "read")?;
-    let data = resp.ok_data()?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    read(&mut conn, json, &mut io::stdout().lock())
+}
+
+pub fn read(conn: &mut Connection, json: bool, out: &mut impl Write) -> Result<()> {
+    let inputs = conn.read()?;
 
     if json {
-        output::print_json(&ReadResult {
-            inputs: data.trim().to_string(),
-        })?;
+        output::write_json(out, &serde_json::json!({ "inputs": inputs }))?;
     } else {
-        println!("Inputs: {data}");
+        writeln!(out, "Inputs: {inputs:#010x}")?;
     }
     Ok(())
 }
 
 pub fn run_write(selector: &DeviceSelector, values: &str, mask: &str, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let cmd = format!("write {values} {mask}");
-    let resp = transport::send_command(&mut port, &cmd)?;
-    resp.ok_data()?;
+    let values = parse_u32(values).context("invalid output values")?;
+    let mask = parse_u32(mask).context("invalid update mask")?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    write(&mut conn, values, mask, json, &mut io::stdout().lock())
+}
+
+pub fn write(
+    conn: &mut Connection,
+    values: u32,
+    mask: u32,
+    json: bool,
+    out: &mut impl Write,
+) -> Result<()> {
+    conn.write(values, mask)?;
 
     if json {
-        output::print_json(&serde_json::json!({"status": "ok"}))?;
+        output::write_json(out, &serde_json::json!({"status": "ok"}))?;
     } else {
-        println!("Output set.");
+        writeln!(out, "Output set.")?;
     }
     Ok(())
 }
 
 pub fn run_state(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "state")?;
-    let data = resp.ok_data()?;
-    let parsed = parse_state(data)?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    state(&mut conn, json, &mut io::stdout().lock())
+}
+
+pub fn state(conn: &mut Connection, json: bool, out: &mut impl Write) -> Result<()> {
+    let state = conn.state()?;
 
     if json {
-        output::print_json(&parsed)?;
+        output::write_json(out, &state)?;
     } else {
-        println!("Inputs:  {}", parsed.inputs);
-        println!("Outputs: {}", parsed.outputs);
-        println!("Flags:   {}", parsed.flags);
+        writeln!(out, "Inputs:  {:#010x}", state.inputs)?;
+        writeln!(out, "Outputs: {:#010x}", state.outputs)?;
+    }
+    Ok(())
+}
+
+/// One push event as a human-readable line.
+pub fn format_event(event: &PushEvent) -> String {
+    match event {
+        PushEvent::InputChange { inputs, t_us } => {
+            format!("INPUT in={inputs:#010x} t={t_us}us")
+        }
+        PushEvent::PatternDone { loops } => format!("PATTERN_DONE loops={loops}"),
+        PushEvent::PatternTimeout { loops } => format!("PATTERN_TIMEOUT loops={loops}"),
+        PushEvent::Unknown { raw } => format!("UNKNOWN {raw}"),
+    }
+}
+
+/// Hand every event from `events` to `emit` until `stop` is set.
+///
+/// The event channel cannot tell that the device is gone (it only closes when
+/// the connection object is dropped), so while no event arrives for
+/// `heartbeat_every` the `heartbeat` check runs; its error ends the loop. A
+/// closed event channel is [`SdkError::Disconnected`] as well, not a clean
+/// end.
+pub fn watch_loop(
+    events: &Receiver<PushEvent>,
+    stop: &AtomicBool,
+    heartbeat_every: Duration,
+    mut heartbeat: impl FnMut() -> Result<()>,
+    mut emit: impl FnMut(&PushEvent) -> Result<()>,
+) -> Result<()> {
+    let mut last_activity = Instant::now();
+    while !stop.load(Ordering::Relaxed) {
+        match events.recv_timeout(WATCH_POLL) {
+            Ok(event) => {
+                emit(&event)?;
+                last_activity = Instant::now();
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                if last_activity.elapsed() >= heartbeat_every {
+                    heartbeat()?;
+                    last_activity = Instant::now();
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => return Err(SdkError::Disconnected.into()),
+        }
     }
     Ok(())
 }
 
 pub fn run_watch(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "subscribe on")?;
-    resp.ok_data()?;
+    let (_info, mut conn) = device::open_device(selector)?;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))
+        .context("failed to set Ctrl+C handler")?;
+
+    watch(
+        &mut conn,
+        json,
+        &stop,
+        WATCH_HEARTBEAT,
+        &mut io::stdout().lock(),
+    )
+}
+
+/// Subscribe to push events and print each one until `stop` is set or the
+/// connection is lost (noticed by a ping after `heartbeat_every` of silence).
+pub fn watch(
+    conn: &mut Connection,
+    json: bool,
+    stop: &AtomicBool,
+    heartbeat_every: Duration,
+    out: &mut impl Write,
+) -> Result<()> {
+    let events = conn.subscribe_events()?;
 
     if !json {
-        println!("Watching for device events (Ctrl+C to stop)...");
+        writeln!(out, "Watching for device events (Ctrl+C to stop)...")?;
+        out.flush().context("failed to write output")?;
     }
 
-    let ctrlc = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let ctrlc_clone = ctrlc.clone();
-    ctrlc::set_handler(move || {
-        ctrlc_clone.store(true, std::sync::atomic::Ordering::Relaxed);
-    })
-    .context("failed to set Ctrl+C handler")?;
-
-    let events = transport::read_push_events(&mut port)?;
-    for event in events {
-        if ctrlc.load(std::sync::atomic::Ordering::Relaxed) {
-            break;
-        }
-        match event {
-            Ok(data) => {
-                let parsed = parse_watch_event(&data);
-                if json {
-                    let _ = output::print_json(&parsed);
-                } else {
-                    println!("{data}");
-                }
+    watch_loop(
+        &events,
+        stop,
+        heartbeat_every,
+        || {
+            conn.ping(WATCH_PING_VALUE)?;
+            Ok(())
+        },
+        |event| {
+            if json {
+                output::write_json(out, event)?;
+            } else {
+                writeln!(out, "{}", format_event(event))?;
             }
-            Err(_) => break,
-        }
-    }
-
-    let _ = transport::send_command(&mut port, "subscribe off");
-    Ok(())
-}
-
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum WatchEvent {
-    Input { inputs: String, timestamp: String },
-    PatternDone { loops_done: u16 },
-    PatternTimeout { loops_done: u16 },
-    SyncClocking,
-    Unknown { raw: String },
-}
-
-pub fn parse_watch_event(data: &str) -> WatchEvent {
-    if let Some(rest) = data.strip_prefix("INPUT ") {
-        let mut inputs = String::new();
-        let mut timestamp = String::new();
-        for part in rest.split_whitespace() {
-            if let Some(val) = part.strip_prefix("t=") {
-                timestamp = val.to_string();
-            } else if part.starts_with("0x") || part.starts_with("0X") {
-                inputs = part.to_string();
-            }
-        }
-        return WatchEvent::Input { inputs, timestamp };
-    }
-    if let Some(rest) = data.strip_prefix("PATTERN_DONE ") {
-        if let Some(n) = parse_loops_field(rest) {
-            return WatchEvent::PatternDone { loops_done: n };
-        }
-    }
-    if let Some(rest) = data.strip_prefix("PATTERN_TIMEOUT ") {
-        if let Some(n) = parse_loops_field(rest) {
-            return WatchEvent::PatternTimeout { loops_done: n };
-        }
-    }
-    if data == "SYNC_CLOCKING" {
-        return WatchEvent::SyncClocking;
-    }
-    WatchEvent::Unknown {
-        raw: data.to_string(),
-    }
-}
-
-fn parse_loops_field(s: &str) -> Option<u16> {
-    s.split_whitespace()
-        .find_map(|part| part.strip_prefix("loops="))
-        .and_then(|v| v.parse().ok())
-}
-
-pub fn parse_state(data: &str) -> Result<StateResult> {
-    let mut inputs = String::new();
-    let mut outputs = String::new();
-    let mut flags = String::new();
-
-    for part in data.split_whitespace() {
-        if let Some(val) = part.strip_prefix("in=") {
-            inputs = val.to_string();
-        } else if let Some(val) = part.strip_prefix("out=") {
-            outputs = val.to_string();
-        } else if let Some(val) = part.strip_prefix("flags=") {
-            flags = val.to_string();
-        }
-    }
-
-    Ok(StateResult {
-        inputs,
-        outputs,
-        flags,
-    })
+            out.flush().context("failed to write output")
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+
+    /// Heartbeat interval that never fires within a test.
+    const IDLE: Duration = Duration::from_secs(3600);
 
     #[test]
-    fn parse_state_basic() {
-        let s = parse_state("in=0x00000005 out=0x0000000A flags=0x00").unwrap();
-        assert_eq!(s.inputs, "0x00000005");
-        assert_eq!(s.outputs, "0x0000000A");
-        assert_eq!(s.flags, "0x00");
-    }
-
-    #[test]
-    fn parse_watch_event_input() {
-        let ev = parse_watch_event("INPUT 0x000005 t=1234567890");
+    fn events_are_formatted_in_wire_style() {
         assert_eq!(
-            ev,
-            WatchEvent::Input {
-                inputs: "0x000005".to_string(),
-                timestamp: "1234567890".to_string(),
-            }
+            format_event(&PushEvent::InputChange {
+                inputs: 5,
+                t_us: 42
+            }),
+            "INPUT in=0x00000005 t=42us"
+        );
+        assert_eq!(
+            format_event(&PushEvent::PatternDone { loops: 3 }),
+            "PATTERN_DONE loops=3"
+        );
+        assert_eq!(
+            format_event(&PushEvent::PatternTimeout { loops: 7 }),
+            "PATTERN_TIMEOUT loops=7"
+        );
+        assert_eq!(
+            format_event(&PushEvent::Unknown {
+                raw: "FOO a=1".into()
+            }),
+            "UNKNOWN FOO a=1"
         );
     }
 
     #[test]
-    fn parse_watch_event_pattern_done() {
-        let ev = parse_watch_event("PATTERN_DONE loops=42");
-        assert_eq!(ev, WatchEvent::PatternDone { loops_done: 42 });
-    }
+    fn watch_loop_delivers_events_in_order_and_reports_disconnect() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(PushEvent::InputChange { inputs: 1, t_us: 5 })
+            .unwrap();
+        tx.send(PushEvent::PatternDone { loops: 2 }).unwrap();
+        drop(tx);
 
-    #[test]
-    fn parse_watch_event_pattern_timeout() {
-        let ev = parse_watch_event("PATTERN_TIMEOUT loops=3");
-        assert_eq!(ev, WatchEvent::PatternTimeout { loops_done: 3 });
-    }
-
-    #[test]
-    fn parse_watch_event_sync_clocking() {
-        let ev = parse_watch_event("SYNC_CLOCKING");
-        assert_eq!(ev, WatchEvent::SyncClocking);
-    }
-
-    #[test]
-    fn parse_watch_event_unknown_keeps_raw() {
-        let ev = parse_watch_event("FOO bar=1");
-        assert_eq!(
-            ev,
-            WatchEvent::Unknown {
-                raw: "FOO bar=1".to_string(),
-            }
+        let mut seen = Vec::new();
+        let result = watch_loop(
+            &rx,
+            &AtomicBool::new(false),
+            IDLE,
+            || Ok(()),
+            |event| {
+                seen.push(event.clone());
+                Ok(())
+            },
         );
+
+        assert_eq!(
+            seen,
+            vec![
+                PushEvent::InputChange { inputs: 1, t_us: 5 },
+                PushEvent::PatternDone { loops: 2 },
+            ]
+        );
+        let err = result.unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<SdkError>(),
+            Some(SdkError::Disconnected)
+        ));
     }
 
     #[test]
-    fn parse_watch_event_pattern_done_missing_loops_is_unknown() {
-        let ev = parse_watch_event("PATTERN_DONE garbage=1");
-        assert_eq!(
-            ev,
-            WatchEvent::Unknown {
-                raw: "PATTERN_DONE garbage=1".to_string(),
-            }
+    fn watch_loop_stops_cleanly_when_flag_is_set() {
+        let (tx, rx) = mpsc::channel::<PushEvent>();
+        let stop = AtomicBool::new(true);
+        assert!(watch_loop(&rx, &stop, IDLE, || Ok(()), |_| Ok(())).is_ok());
+        drop(tx);
+    }
+
+    #[test]
+    fn watch_loop_propagates_emit_errors() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(PushEvent::PatternDone { loops: 1 }).unwrap();
+        let result = watch_loop(
+            &rx,
+            &AtomicBool::new(false),
+            IDLE,
+            || Ok(()),
+            |_| Err(anyhow::anyhow!("sink closed")),
         );
+        assert_eq!(result.unwrap_err().to_string(), "sink closed");
+    }
+
+    #[test]
+    fn watch_loop_runs_the_heartbeat_when_idle_and_stops_on_its_error() {
+        let (tx, rx) = mpsc::channel::<PushEvent>();
+        let mut beats = 0;
+        let result = watch_loop(
+            &rx,
+            &AtomicBool::new(false),
+            Duration::from_millis(150),
+            || {
+                beats += 1;
+                if beats == 2 {
+                    Err(SdkError::Timeout.into())
+                } else {
+                    Ok(())
+                }
+            },
+            |_| Ok(()),
+        );
+        assert_eq!(beats, 2);
+        assert!(matches!(
+            result.unwrap_err().downcast_ref::<SdkError>(),
+            Some(SdkError::Timeout)
+        ));
+        drop(tx);
+    }
+
+    #[test]
+    fn watch_loop_does_not_heartbeat_while_events_keep_arriving() {
+        let (tx, rx) = mpsc::channel();
+        for loops in 0..3 {
+            tx.send(PushEvent::PatternDone { loops }).unwrap();
+        }
+        drop(tx);
+        let mut beats = 0;
+        let _ = watch_loop(
+            &rx,
+            &AtomicBool::new(false),
+            Duration::from_secs(3600),
+            || {
+                beats += 1;
+                Ok(())
+            },
+            |_| Ok(()),
+        );
+        assert_eq!(beats, 0);
     }
 }

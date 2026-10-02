@@ -1,47 +1,105 @@
+use std::io::{self, Write};
+use std::path::Path;
+
 use anyhow::{Context, Result};
-use serde::Serialize;
+use pochi_sdk::{config, Connection, PatternMode, PatternState, PatternStep, PATTERN_TICK_NS};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
-use crate::transport;
+use crate::parse::parse_step;
 
-#[derive(Debug, Serialize)]
-pub struct PatternStatus {
-    pub state: String,
-    pub current_step: u16,
-    pub loops_done: u16,
+/// Lower-case name of a pattern engine state.
+pub fn state_label(state: PatternState) -> &'static str {
+    match state {
+        PatternState::Idle => "idle",
+        PatternState::Loaded => "loaded",
+        PatternState::Running => "running",
+        PatternState::Done => "done",
+    }
 }
 
-pub fn run_load_hex(selector: &DeviceSelector, hex: &str, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let cmd = format!("pattern load {hex}");
-    let resp = transport::send_command(&mut port, &cmd)?;
-    let data = resp.ok_data()?;
+/// Human summary of a step list: step count and total hold time. The hold of
+/// each step is in pattern ticks; the per-step PIO overhead is not counted.
+pub fn summarize(steps: &[PatternStep]) -> String {
+    let ticks: u64 = steps.iter().map(|s| u64::from(s.hold_ticks)).sum();
+    format!(
+        "{} steps, {} ticks ({} ns)",
+        steps.len(),
+        ticks,
+        ticks * u64::from(PATTERN_TICK_NS)
+    )
+}
+
+pub fn run_add(selector: &DeviceSelector, steps: &[String], json: bool) -> Result<()> {
+    let steps: Vec<PatternStep> = steps.iter().map(|s| parse_step(s)).collect::<Result<_>>()?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    add(&mut conn, &steps, json, &mut io::stdout().lock())
+}
+
+/// Append `steps` to the pattern buffer (split into lines by the SDK).
+pub fn add(
+    conn: &mut Connection,
+    steps: &[PatternStep],
+    json: bool,
+    out: &mut impl Write,
+) -> Result<()> {
+    let total = conn.pattern_add(steps)?;
 
     if json {
-        output::print_json(&serde_json::json!({"status": "ok", "response": data}))?;
+        output::write_json(out, &serde_json::json!({"status": "ok", "total": total}))?;
     } else {
-        println!("Pattern loaded. {data}");
+        writeln!(
+            out,
+            "Added {}. Pattern has {total} steps.",
+            summarize(steps)
+        )?;
     }
     Ok(())
 }
 
-pub fn run_load_file(selector: &DeviceSelector, file: &str, json: bool) -> Result<()> {
-    let contents = std::fs::read_to_string(file)
+/// Read and parse a `pattern.toml` with the SDK parser; errors name the file
+/// and line.
+pub fn load_pattern_file(file: &str) -> Result<Vec<PatternStep>> {
+    let src = std::fs::read_to_string(Path::new(file))
         .with_context(|| format!("failed to read pattern file: {file}"))?;
-    let hex = crate::toml_convert::pattern_toml_to_hex(&contents)?;
-    run_load_hex(selector, &hex, json)
+    Ok(config::parse_pattern(&src, file)?)
+}
+
+pub fn run_load_file(selector: &DeviceSelector, file: &str, json: bool) -> Result<()> {
+    let steps = load_pattern_file(file)?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    load(&mut conn, &steps, file, json, &mut io::stdout().lock())
+}
+
+/// Replace the pattern buffer with `steps` (`pattern reset`, then add).
+pub fn load(
+    conn: &mut Connection,
+    steps: &[PatternStep],
+    source: &str,
+    json: bool,
+    out: &mut impl Write,
+) -> Result<()> {
+    let total = conn.pattern_load(steps)?;
+
+    if json {
+        output::write_json(out, &serde_json::json!({"status": "ok", "total": total}))?;
+    } else {
+        writeln!(
+            out,
+            "Loaded {source}: {}. The pattern now has {total} steps.",
+            summarize(steps)
+        )?;
+    }
+    Ok(())
 }
 
 pub fn run_run(selector: &DeviceSelector, loop_mode: bool, repeat: u16, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let cmd = if loop_mode {
-        format!("pattern run loop {repeat}")
+    let (_info, mut conn) = device::open_device(selector)?;
+    if loop_mode {
+        conn.pattern_run(PatternMode::Loop, repeat)?;
     } else {
-        "pattern run once 1".to_string()
-    };
-    let resp = transport::send_command(&mut port, &cmd)?;
-    resp.ok_data()?;
+        conn.pattern_run_once()?;
+    }
 
     if json {
         output::print_json(&serde_json::json!({"status": "ok"}))?;
@@ -52,9 +110,8 @@ pub fn run_run(selector: &DeviceSelector, loop_mode: bool, repeat: u16, json: bo
 }
 
 pub fn run_stop(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "pattern stop")?;
-    resp.ok_data()?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    conn.pattern_stop()?;
 
     if json {
         output::print_json(&serde_json::json!({"status": "ok"}))?;
@@ -65,9 +122,8 @@ pub fn run_stop(selector: &DeviceSelector, json: bool) -> Result<()> {
 }
 
 pub fn run_reset(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "pattern reset")?;
-    resp.ok_data()?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    conn.pattern_reset()?;
 
     if json {
         output::print_json(&serde_json::json!({"status": "ok"}))?;
@@ -78,42 +134,22 @@ pub fn run_reset(selector: &DeviceSelector, json: bool) -> Result<()> {
 }
 
 pub fn run_status(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "pattern status")?;
-    let data = resp.ok_data()?;
-    let parsed = parse_pattern_status(data)?;
-
-    if json {
-        output::print_json(&parsed)?;
-    } else {
-        println!("State:        {}", parsed.state);
-        println!("Current step: {}", parsed.current_step);
-        println!("Loops done:   {}", parsed.loops_done);
-    }
-    Ok(())
+    let (_info, mut conn) = device::open_device(selector)?;
+    status(&mut conn, json, &mut io::stdout().lock())
 }
 
-pub fn parse_pattern_status(data: &str) -> Result<PatternStatus> {
-    let mut state = String::new();
-    let mut current_step = 0u16;
-    let mut loops_done = 0u16;
+pub fn status(conn: &mut Connection, json: bool, out: &mut impl Write) -> Result<()> {
+    let status = conn.pattern_status()?;
 
-    for part in data.split_whitespace() {
-        if let Some((key, val)) = part.split_once('=') {
-            match key {
-                "state" => state = val.to_string(),
-                "step" => current_step = val.parse().context("invalid step")?,
-                "loops" => loops_done = val.parse().context("invalid loops")?,
-                _ => {}
-            }
-        }
+    if json {
+        output::write_json(out, &status)?;
+    } else {
+        writeln!(out, "State:        {}", state_label(status.state))?;
+        writeln!(out, "Current step: {}", status.step)?;
+        writeln!(out, "Loops done:   {}", status.loops)?;
+        writeln!(out, "Total steps:  {}", status.total)?;
     }
-
-    Ok(PatternStatus {
-        state,
-        current_step,
-        loops_done,
-    })
+    Ok(())
 }
 
 #[cfg(test)]
@@ -121,16 +157,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_status_basic() {
-        let s = parse_pattern_status("state=running step=5 loops=3").unwrap();
-        assert_eq!(s.state, "running");
-        assert_eq!(s.current_step, 5);
-        assert_eq!(s.loops_done, 3);
+    fn state_labels_are_lower_case() {
+        assert_eq!(state_label(PatternState::Idle), "idle");
+        assert_eq!(state_label(PatternState::Loaded), "loaded");
+        assert_eq!(state_label(PatternState::Running), "running");
+        assert_eq!(state_label(PatternState::Done), "done");
     }
 
     #[test]
-    fn parse_status_idle() {
-        let s = parse_pattern_status("state=idle step=0 loops=0").unwrap();
-        assert_eq!(s.state, "idle");
+    fn summary_counts_ticks_and_nanoseconds() {
+        let steps = [
+            PatternStep {
+                out_bits: 1,
+                hold_ticks: 5,
+            },
+            PatternStep {
+                out_bits: 0,
+                hold_ticks: 10,
+            },
+        ];
+        assert_eq!(summarize(&steps), "2 steps, 15 ticks (3000 ns)");
+    }
+
+    #[test]
+    fn summary_does_not_overflow_on_large_holds() {
+        let steps = [PatternStep {
+            out_bits: 1,
+            hold_ticks: u32::MAX,
+        }; 2];
+        assert!(summarize(&steps).starts_with("2 steps, 8589934590 ticks"));
+    }
+
+    #[test]
+    fn load_pattern_file_reports_missing_file() {
+        let err = load_pattern_file("/nonexistent/pochi-pattern.toml").unwrap_err();
+        assert!(err.to_string().contains("failed to read pattern file"));
     }
 }
