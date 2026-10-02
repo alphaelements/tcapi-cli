@@ -1,4 +1,5 @@
 use anyhow::Result;
+use pochi_sdk::discovery;
 
 use crate::device;
 use crate::output;
@@ -16,24 +17,18 @@ pub fn run(json: bool) -> Result<()> {
         return Ok(());
     }
 
-    let duplicates = device::find_duplicates(&devices);
+    let duplicates = discovery::find_duplicate_numbers(&devices);
 
     let headers = &["#", "UID", "PORT", "VERSION", ""];
     let rows: Vec<Vec<String>> = devices
         .iter()
         .map(|d| {
-            let num_str = match d.device_number {
-                Some(n) => n.to_string(),
-                None => "-".to_string(),
-            };
-            let dup_mark = if let Some(n) = d.device_number {
-                if duplicates.contains(&n) {
-                    "⚠ DUPLICATE".to_string()
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
+            let num_str = d
+                .device_number
+                .map_or_else(|| "-".to_string(), |n| n.to_string());
+            let dup_mark = match d.device_number {
+                Some(n) if duplicates.contains(&n) => "⚠ DUPLICATE".to_string(),
+                _ => String::new(),
             };
             vec![
                 num_str,
@@ -45,13 +40,10 @@ pub fn run(json: bool) -> Result<()> {
         })
         .collect();
 
-    output::print_table(headers, &rows);
+    output::print_table(headers, &rows)?;
 
     if !duplicates.is_empty() {
-        eprintln!(
-            "\nWarning: duplicate device numbers detected: {:?}",
-            duplicates
-        );
+        eprintln!("\nWarning: duplicate device numbers detected: {duplicates:?}");
         eprintln!("Use 'pochi devnum auto' to assign unique numbers, or specify --uid/--port.");
     }
 

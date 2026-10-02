@@ -1,18 +1,9 @@
-use anyhow::{bail, Context, Result};
-use serialport::SerialPortType;
+//! Device enumeration and selection (`--port`, `--uid`, `--device`). The
+//! scanning, probing and connecting is done by `pochi-sdk`; this module adds
+//! the CLI's selection rules and error messages.
 
-use crate::transport;
-
-const POCHI_VID: u16 = 0x2E8A;
-const POCHI_PID: u16 = 0x000A;
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DeviceInfo {
-    pub uid: String,
-    pub device_number: Option<u8>,
-    pub port: String,
-    pub version: Option<String>,
-}
+use anyhow::{Context, Result};
+use pochi_sdk::{discovery, Connection, DeviceInfo, SdkError};
 
 #[derive(Debug, Clone)]
 pub struct DeviceSelector {
@@ -21,155 +12,68 @@ pub struct DeviceSelector {
     pub port: Option<String>,
 }
 
-pub fn enumerate_ports() -> Result<Vec<String>> {
-    let ports = serialport::available_ports().context("failed to list serial ports")?;
-    let mut pochi_ports = Vec::new();
-    for port in ports {
-        if let SerialPortType::UsbPort(info) = &port.port_type {
-            // Accept the legacy "Tachyon" product string too: devices in
-            // the field may still run pre-rename firmware.
-            if info.vid == POCHI_VID
-                && info.pid == POCHI_PID
-                && info
-                    .product
-                    .as_ref()
-                    .is_some_and(|p| p.starts_with("Pochi") || p.starts_with("Tachyon"))
-            {
-                pochi_ports.push(port.port_name);
-            }
-        }
-    }
-    Ok(pochi_ports)
-}
-
+/// Enumerate and probe all Pochi-DIO devices. Ports that fail to probe (for
+/// example held open by another process) are reported as warnings; they do
+/// not abort the scan.
 pub fn enumerate_devices() -> Result<Vec<DeviceInfo>> {
-    let ports = enumerate_ports()?;
-    let mut devices = Vec::new();
-    for port_path in ports {
-        match probe_device(&port_path) {
-            Ok(info) => devices.push(info),
-            Err(e) => {
-                eprintln!("warning: failed to probe {port_path}: {e}");
-            }
-        }
+    let found = discovery::discover_detailed()?;
+    for failure in &found.failures {
+        eprintln!(
+            "warning: failed to probe {}: {}",
+            failure.port, failure.error
+        );
     }
-    Ok(devices)
+    Ok(found.devices)
 }
 
-fn probe_device(port_path: &str) -> Result<DeviceInfo> {
-    let mut port = transport::open_port(port_path)?;
-    let resp = transport::send_command(&mut port, "info")?;
-    let data = resp.ok_data()?;
-    let (uid, device_number) = parse_info_response(data)?;
-
-    let version = match transport::send_command(&mut port, "version") {
-        Ok(resp) => resp
-            .ok_data()
-            .ok()
-            .map(|d| d.split_whitespace().next().unwrap_or(d).to_string()),
-        Err(_) => None,
-    };
-
-    Ok(DeviceInfo {
-        uid,
-        device_number,
-        port: port_path.to_string(),
-        version,
-    })
-}
-
-fn parse_info_response(data: &str) -> Result<(String, Option<u8>)> {
-    let mut uid = String::new();
-    let mut devnum: Option<u8> = None;
-
-    for part in data.split_whitespace() {
-        if let Some(val) = part.strip_prefix("uid=") {
-            uid = val.to_string();
-        } else if let Some(val) = part.strip_prefix("devnum=") {
-            let n: u16 = val.parse().context("invalid devnum")?;
-            devnum = if n == 255 { None } else { Some(n as u8) };
-        }
-    }
-
-    if uid.is_empty() {
-        bail!("missing uid in info response");
-    }
-
-    Ok((uid, devnum))
-}
-
-pub fn find_duplicates(devices: &[DeviceInfo]) -> Vec<u8> {
-    let mut seen = std::collections::HashMap::new();
-    let mut duplicates = Vec::new();
-    for dev in devices {
-        if let Some(num) = dev.device_number {
-            let count = seen.entry(num).or_insert(0u32);
-            *count += 1;
-            if *count == 2 {
-                duplicates.push(num);
-            }
-        }
-    }
-    duplicates
-}
-
+/// Pick one device from an enumerated list: `--port`, then `--uid`, then
+/// `--device`, otherwise the sole device.
 pub fn select_device(devices: &[DeviceInfo], selector: &DeviceSelector) -> Result<DeviceInfo> {
     if let Some(port) = &selector.port {
         return devices
             .iter()
             .find(|d| d.port == *port)
             .cloned()
+            .ok_or(SdkError::NoDevice)
             .with_context(|| format!("no Pochi-DIO device on port {port}"));
     }
-
     if let Some(uid) = &selector.uid {
-        let uid_upper = uid.to_uppercase();
-        return devices
-            .iter()
-            .find(|d| d.uid.to_uppercase() == uid_upper)
-            .cloned()
+        return discovery::find_by_uid(devices, uid)
             .with_context(|| format!("no Pochi-DIO device with UID {uid}"));
     }
-
     if let Some(num) = selector.device {
-        let matches: Vec<_> = devices
-            .iter()
-            .filter(|d| d.device_number == Some(num))
-            .collect();
-        return match matches.len() {
-            0 => bail!("no Pochi-DIO device with device number {num}"),
-            1 => Ok(matches[0].clone()),
-            _ => bail!(
-                "multiple devices with device number {num}; use --uid or --port to disambiguate"
-            ),
-        };
+        return discovery::find_by_device_number(devices, num).with_context(|| {
+            format!(
+                "cannot select device number {num}; if several devices share it, \
+                 use --uid or --port to disambiguate"
+            )
+        });
     }
-
-    match devices.len() {
-        0 => bail!("no Pochi-DIO device found"),
-        1 => Ok(devices[0].clone()),
-        n => bail!("{n} Pochi-DIO devices found; specify --uid, --device, or --port"),
-    }
+    Ok(discovery::select_sole_device(devices)?)
 }
 
-pub fn open_device(
-    selector: &DeviceSelector,
-) -> Result<(DeviceInfo, Box<dyn serialport::SerialPort>)> {
-    if let Some(port_path) = &selector.port {
-        let port = transport::open_port(port_path)?;
+/// Connect to the selected device. `--port` opens the path directly (no
+/// enumeration); the returned info then only knows the port.
+pub fn open_device(selector: &DeviceSelector) -> Result<(DeviceInfo, Connection)> {
+    if let Some(port) = &selector.port {
+        let conn = open_port(port)?;
         let info = DeviceInfo {
             uid: String::new(),
             device_number: None,
-            port: port_path.clone(),
+            port: port.clone(),
             version: None,
         };
-        return Ok((info, port));
+        return Ok((info, conn));
     }
-
     let devices = enumerate_devices()?;
     let selected = select_device(&devices, selector)?;
-    let port = transport::open_port(&selected.port)?;
-    Ok((selected, port))
+    let conn = open_port(&selected.port)?;
+    Ok((selected, conn))
+}
+
+/// Open one serial port and verify the device speaks `proto=2`.
+pub fn open_port(port: &str) -> Result<Connection> {
+    Connection::open(port).with_context(|| format!("failed to open {port}"))
 }
 
 #[cfg(test)]
@@ -181,135 +85,101 @@ mod tests {
             uid: uid.to_string(),
             device_number: devnum,
             port: port.to_string(),
-            version: Some("v0.1.0".to_string()),
+            version: Some("0.1.3".to_string()),
         }
+    }
+
+    fn selector(uid: Option<&str>, device: Option<u8>, port: Option<&str>) -> DeviceSelector {
+        DeviceSelector {
+            uid: uid.map(str::to_string),
+            device,
+            port: port.map(str::to_string),
+        }
+    }
+
+    fn pair() -> Vec<DeviceInfo> {
+        vec![
+            make_device("AABB", Some(1), "/dev/ttyACM0"),
+            make_device("CCDD", Some(2), "/dev/ttyACM1"),
+        ]
     }
 
     #[test]
     fn select_single_device() {
         let devices = vec![make_device("AABB", Some(1), "/dev/ttyACM0")];
-        let sel = DeviceSelector {
-            uid: None,
-            device: None,
-            port: None,
-        };
-        let result = select_device(&devices, &sel).unwrap();
+        let result = select_device(&devices, &selector(None, None, None)).unwrap();
         assert_eq!(result.uid, "AABB");
     }
 
     #[test]
-    fn select_by_uid() {
-        let devices = vec![
-            make_device("AABB", Some(1), "/dev/ttyACM0"),
-            make_device("CCDD", Some(2), "/dev/ttyACM1"),
-        ];
-        let sel = DeviceSelector {
-            uid: Some("ccdd".to_string()),
-            device: None,
-            port: None,
-        };
-        let result = select_device(&devices, &sel).unwrap();
+    fn select_by_uid_is_case_insensitive() {
+        let result = select_device(&pair(), &selector(Some("ccdd"), None, None)).unwrap();
         assert_eq!(result.uid, "CCDD");
     }
 
     #[test]
     fn select_by_device_number() {
-        let devices = vec![
-            make_device("AABB", Some(1), "/dev/ttyACM0"),
-            make_device("CCDD", Some(2), "/dev/ttyACM1"),
-        ];
-        let sel = DeviceSelector {
-            uid: None,
-            device: Some(2),
-            port: None,
-        };
-        let result = select_device(&devices, &sel).unwrap();
+        let result = select_device(&pair(), &selector(None, Some(2), None)).unwrap();
         assert_eq!(result.uid, "CCDD");
     }
 
     #[test]
     fn select_by_port() {
-        let devices = vec![
-            make_device("AABB", Some(1), "/dev/ttyACM0"),
-            make_device("CCDD", Some(2), "/dev/ttyACM1"),
-        ];
-        let sel = DeviceSelector {
-            uid: None,
-            device: None,
-            port: Some("/dev/ttyACM1".to_string()),
-        };
-        let result = select_device(&devices, &sel).unwrap();
+        let result = select_device(&pair(), &selector(None, None, Some("/dev/ttyACM1"))).unwrap();
         assert_eq!(result.uid, "CCDD");
     }
 
     #[test]
-    fn select_multiple_no_selector_fails() {
-        let devices = vec![
-            make_device("AABB", Some(1), "/dev/ttyACM0"),
-            make_device("CCDD", Some(2), "/dev/ttyACM1"),
-        ];
-        let sel = DeviceSelector {
-            uid: None,
-            device: None,
-            port: None,
-        };
-        assert!(select_device(&devices, &sel).is_err());
+    fn select_port_takes_priority_over_uid() {
+        let result =
+            select_device(&pair(), &selector(Some("AABB"), None, Some("/dev/ttyACM1"))).unwrap();
+        assert_eq!(result.uid, "CCDD");
     }
 
     #[test]
-    fn select_duplicate_devnum_fails() {
+    fn select_multiple_without_selector_fails() {
+        let err = select_device(&pair(), &selector(None, None, None)).unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<SdkError>(),
+            Some(SdkError::MultipleDevices)
+        ));
+    }
+
+    #[test]
+    fn select_duplicate_device_number_fails_and_hints_at_uid() {
         let devices = vec![
             make_device("AABB", Some(1), "/dev/ttyACM0"),
             make_device("CCDD", Some(1), "/dev/ttyACM1"),
         ];
-        let sel = DeviceSelector {
-            uid: None,
-            device: Some(1),
-            port: None,
-        };
-        assert!(select_device(&devices, &sel).is_err());
+        let err = select_device(&devices, &selector(None, Some(1), None)).unwrap_err();
+        assert!(format!("{err:#}").contains("--uid"));
+        assert!(matches!(
+            err.downcast_ref::<SdkError>(),
+            Some(SdkError::MultipleDevices)
+        ));
     }
 
     #[test]
-    fn find_duplicates_none() {
-        let devices = vec![
-            make_device("A", Some(1), "a"),
-            make_device("B", Some(2), "b"),
-        ];
-        assert!(find_duplicates(&devices).is_empty());
+    fn select_unknown_targets_report_no_device() {
+        for sel in [
+            selector(Some("EEFF"), None, None),
+            selector(None, Some(9), None),
+            selector(None, None, Some("/dev/ttyACM9")),
+        ] {
+            let err = select_device(&pair(), &sel).unwrap_err();
+            assert!(matches!(
+                err.downcast_ref::<SdkError>(),
+                Some(SdkError::NoDevice)
+            ));
+        }
     }
 
     #[test]
-    fn find_duplicates_present() {
-        let devices = vec![
-            make_device("A", Some(1), "a"),
-            make_device("B", Some(1), "b"),
-            make_device("C", Some(2), "c"),
-        ];
-        assert_eq!(find_duplicates(&devices), vec![1]);
-    }
-
-    #[test]
-    fn parse_info_basic() {
-        let (uid, devnum) = parse_info_response("uid=AABBCCDD11223344 devnum=42").unwrap();
-        assert_eq!(uid, "AABBCCDD11223344");
-        assert_eq!(devnum, Some(42));
-    }
-
-    #[test]
-    fn parse_info_unassigned() {
-        let (uid, devnum) = parse_info_response("uid=AABBCCDD11223344 devnum=255").unwrap();
-        assert_eq!(uid, "AABBCCDD11223344");
-        assert_eq!(devnum, None);
-    }
-
-    #[test]
-    fn select_no_devices_fails() {
-        let sel = DeviceSelector {
-            uid: None,
-            device: None,
-            port: None,
-        };
-        assert!(select_device(&[], &sel).is_err());
+    fn select_from_empty_list_fails() {
+        let err = select_device(&[], &selector(None, None, None)).unwrap_err();
+        assert!(matches!(
+            err.downcast_ref::<SdkError>(),
+            Some(SdkError::NoDevice)
+        ));
     }
 }

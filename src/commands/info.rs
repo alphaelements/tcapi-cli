@@ -1,156 +1,157 @@
+use std::io::{self, Write};
+
 use anyhow::{bail, Context, Result};
-use serde::Serialize;
+use pochi_sdk::{Capabilities, Connection, DeviceInfo, VersionInfo};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
-use crate::transport;
 
-pub const FEAT_SYNC: u32 = 0x0000_0001;
-pub const FEAT_RESET: u32 = 0x0000_0002;
+/// The `devnum` value that clears the assignment on the device.
+const DEVNUM_UNASSIGNED: u8 = 255;
 
-#[derive(Debug, Serialize)]
-pub struct VersionInfo {
-    pub firmware: String,
-    pub protocol: u8,
+/// Names of the feature bits set in `caps.features`.
+pub fn feature_labels(caps: &Capabilities) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    if caps.has_sync() {
+        labels.push("sync");
+    }
+    if caps.has_reset() {
+        labels.push("reset");
+    }
+    labels
 }
 
-#[derive(Debug, Serialize)]
-pub struct CapsInfo {
-    pub proto_ver: u8,
-    pub max_dio: u8,
-    pub out_count: u8,
-    pub in_count: u8,
-    pub ts_resolution_ns: u32,
-    pub max_pattern_steps: u16,
-    pub ts_ring_events: u16,
-    pub features: u32,
-}
-
-impl CapsInfo {
-    pub fn has_sync(&self) -> bool {
-        self.features & FEAT_SYNC != 0
-    }
-
-    pub fn has_reset(&self) -> bool {
-        self.features & FEAT_RESET != 0
-    }
-
-    pub fn feature_labels(&self) -> Vec<&'static str> {
-        let mut labels = Vec::new();
-        if self.has_sync() {
-            labels.push("sync");
-        }
-        if self.has_reset() {
-            labels.push("reset");
-        }
-        labels
-    }
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeviceInfoResult {
-    pub uid: String,
-    pub device_number: Option<u8>,
+/// Firmware version as `v<major>.<minor>.<patch>`.
+pub fn format_firmware(version: &VersionInfo) -> String {
+    format!("v{}.{}.{}", version.major, version.minor, version.patch)
 }
 
 pub fn run_version(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "version")?;
-    let data = resp.ok_data()?;
-    let parsed = parse_version(data)?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    version(&mut conn, json, &mut io::stdout().lock())
+}
+
+pub fn version(conn: &mut Connection, json: bool, out: &mut impl Write) -> Result<()> {
+    let version = conn.version()?;
 
     if json {
-        output::print_json(&parsed)?;
+        output::write_json(out, &version)?;
     } else {
-        println!("Firmware: {}", parsed.firmware);
-        println!("Protocol: v{}", parsed.protocol);
+        writeln!(out, "Firmware: {}", format_firmware(&version))?;
+        writeln!(out, "Protocol: v{}", version.protocol_version)?;
     }
     Ok(())
 }
 
 pub fn run_caps(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "caps")?;
-    let data = resp.ok_data()?;
-    let parsed = parse_caps(data)?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    caps(&mut conn, json, &mut io::stdout().lock())
+}
+
+pub fn caps(conn: &mut Connection, json: bool, out: &mut impl Write) -> Result<()> {
+    let caps = conn.caps()?;
 
     if json {
-        output::print_json(&parsed)?;
+        output::write_json(out, &caps)?;
     } else {
-        println!("Protocol version: {}", parsed.proto_ver);
-        println!("Max DIO channels:  {}", parsed.max_dio);
-        println!("Output channels:   {}", parsed.out_count);
-        println!("Input channels:    {}", parsed.in_count);
-        println!(
+        writeln!(out, "DIO channels:      {}", caps.dio)?;
+        writeln!(out, "Output channels:   {}", caps.out)?;
+        writeln!(out, "Input channels:    {}", caps.r#in)?;
+        writeln!(
+            out,
             "TS resolution:     {} ns (sub-µs phase step)",
-            parsed.ts_resolution_ns
-        );
-        println!("Max pattern steps: {}", parsed.max_pattern_steps);
-        println!("TS ring capacity:  {}", parsed.ts_ring_events);
-        let labels = parsed.feature_labels();
+            caps.ts_res_ns
+        )?;
+        writeln!(out, "Pattern tick:      {} ns", caps.tick_ns)?;
+        writeln!(out, "Max pattern steps: {}", caps.pattern_max)?;
+        writeln!(out, "TS ring capacity:  {}", caps.ring)?;
+        let labels = feature_labels(&caps);
         if labels.is_empty() {
-            println!("Features:          {:#010x}", parsed.features);
+            writeln!(out, "Features:          {:#010x}", caps.features)?;
         } else {
-            println!(
+            writeln!(
+                out,
                 "Features:          {:#010x} ({})",
-                parsed.features,
+                caps.features,
                 labels.join(", ")
-            );
+            )?;
         }
     }
     Ok(())
 }
 
 pub fn run_info(selector: &DeviceSelector, json: bool) -> Result<()> {
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, "info")?;
-    let data = resp.ok_data()?;
-    let parsed = parse_device_info(data)?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    info(&mut conn, json, &mut io::stdout().lock())
+}
+
+pub fn info(conn: &mut Connection, json: bool, out: &mut impl Write) -> Result<()> {
+    let info = conn.info()?;
 
     if json {
-        output::print_json(&parsed)?;
+        output::write_json(out, &info)?;
     } else {
-        println!("UID:           {}", parsed.uid);
-        match parsed.device_number {
-            Some(n) => println!("Device number: {n}"),
-            None => println!("Device number: (unassigned)"),
+        writeln!(out, "UID:           {}", info.uid)?;
+        match info.device_number {
+            Some(n) => writeln!(out, "Device number: {n}")?,
+            None => writeln!(out, "Device number: (unassigned)")?,
         }
     }
     Ok(())
+}
+
+/// Parse the `devnum` argument: `reset` clears the number (255), otherwise a
+/// number 0-254.
+pub fn parse_devnum(value: &str) -> Result<u8> {
+    if value == "reset" {
+        return Ok(DEVNUM_UNASSIGNED);
+    }
+    let num: u8 = value
+        .parse()
+        .with_context(|| format!("invalid device number {value:?} (0-254, 'reset' or 'auto')"))?;
+    if num == DEVNUM_UNASSIGNED {
+        bail!("device number must be 0-254 (use 'reset' to unassign)");
+    }
+    Ok(num)
 }
 
 pub fn run_devnum(selector: &DeviceSelector, value: &str, json: bool) -> Result<()> {
     if value == "auto" {
         return run_devnum_auto(json);
     }
+    let num = parse_devnum(value)?;
 
-    let num: u16 = if value == "reset" {
-        255
-    } else {
-        value.parse().context("invalid device number")?
-    };
-
-    if num > 255 {
-        bail!("device number must be 0-254 (or 'reset')");
-    }
-
-    let (_info, mut port) = device::open_device(selector)?;
-    let resp = transport::send_command(&mut port, &format!("devnum {num}"))?;
-    resp.ok_data()?;
+    let (_info, mut conn) = device::open_device(selector)?;
+    conn.set_device_number(num)?;
 
     if json {
-        let result = if num == 255 {
-            serde_json::json!({"device_number": serde_json::Value::Null})
-        } else {
-            serde_json::json!({"device_number": num})
-        };
-        output::print_json(&result)?;
-    } else if num == 255 {
+        let number = (num != DEVNUM_UNASSIGNED).then_some(num);
+        output::print_json(&serde_json::json!({ "device_number": number }))?;
+    } else if num == DEVNUM_UNASSIGNED {
         println!("Device number reset to unassigned.");
     } else {
         println!("Device number set to {num}.");
     }
     Ok(())
+}
+
+/// Pair every unassigned device (by index into `devices`) with the lowest
+/// number not used by any device, ascending.
+pub fn plan_auto_assignment(devices: &[DeviceInfo]) -> Result<Vec<(usize, u8)>> {
+    let mut used: std::collections::HashSet<u8> =
+        devices.iter().filter_map(|d| d.device_number).collect();
+    let mut plan = Vec::new();
+    for (index, dev) in devices.iter().enumerate() {
+        if dev.device_number.is_some() {
+            continue;
+        }
+        let free = (0..DEVNUM_UNASSIGNED)
+            .find(|n| !used.contains(n))
+            .context("no available device numbers")?;
+        used.insert(free);
+        plan.push((index, free));
+    }
+    Ok(plan)
 }
 
 fn run_devnum_auto(json: bool) -> Result<()> {
@@ -159,18 +160,8 @@ fn run_devnum_auto(json: bool) -> Result<()> {
         bail!("no Pochi-DIO devices found");
     }
 
-    let mut used: std::collections::HashSet<u8> = std::collections::HashSet::new();
-    for d in &devices {
-        if let Some(n) = d.device_number {
-            used.insert(n);
-        }
-    }
-
-    let unassigned: Vec<_> = devices
-        .iter()
-        .filter(|d| d.device_number.is_none())
-        .collect();
-    if unassigned.is_empty() {
+    let plan = plan_auto_assignment(&devices)?;
+    if plan.is_empty() {
         if json {
             output::print_json(&serde_json::json!({"assignments": []}))?;
         } else {
@@ -180,27 +171,14 @@ fn run_devnum_auto(json: bool) -> Result<()> {
     }
 
     let mut assignments = Vec::new();
-    let mut next_num: u8 = 0;
-
-    for dev in &unassigned {
-        while used.contains(&next_num) {
-            next_num = next_num
-                .checked_add(1)
-                .context("no available device numbers")?;
-        }
-
-        let mut port = transport::open_port(&dev.port)?;
-        let resp = transport::send_command(&mut port, &format!("devnum {next_num}"))?;
-        resp.ok_data()?;
-
+    for (index, number) in plan {
+        let dev = &devices[index];
+        device::open_port(&dev.port)?.set_device_number(number)?;
         assignments.push(serde_json::json!({
             "uid": dev.uid,
             "port": dev.port,
-            "device_number": next_num,
+            "device_number": number,
         }));
-
-        used.insert(next_num);
-        next_num = next_num.saturating_add(1);
     }
 
     if json {
@@ -209,8 +187,8 @@ fn run_devnum_auto(json: bool) -> Result<()> {
         for a in &assignments {
             println!(
                 "Assigned device {} ({}) → #{}",
-                a["uid"].as_str().unwrap_or(""),
-                a["port"].as_str().unwrap_or(""),
+                a["uid"].as_str().unwrap_or_default(),
+                a["port"].as_str().unwrap_or_default(),
                 a["device_number"]
             );
         }
@@ -218,167 +196,89 @@ fn run_devnum_auto(json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn parse_version(data: &str) -> Result<VersionInfo> {
-    let mut firmware = String::new();
-    let mut protocol = 0u8;
-
-    for part in data.split_whitespace() {
-        if let Some(val) = part.strip_prefix("proto=") {
-            protocol = val.parse().context("invalid proto")?;
-        } else if part.starts_with('v') || part.contains('.') {
-            firmware = part.to_string();
-        }
-    }
-
-    if firmware.is_empty() {
-        bail!("missing firmware version in response: {data}");
-    }
-
-    Ok(VersionInfo { firmware, protocol })
-}
-
-pub fn parse_caps(data: &str) -> Result<CapsInfo> {
-    let mut info = CapsInfo {
-        proto_ver: 0,
-        max_dio: 0,
-        out_count: 0,
-        in_count: 0,
-        ts_resolution_ns: 0,
-        max_pattern_steps: 0,
-        ts_ring_events: 0,
-        features: 0,
-    };
-
-    for part in data.split_whitespace() {
-        if let Some((key, val)) = part.split_once('=') {
-            match key {
-                "dio" => info.max_dio = val.parse().context("invalid dio")?,
-                "out" => info.out_count = val.parse().context("invalid out")?,
-                "in" => info.in_count = val.parse().context("invalid in")?,
-                "ts_res" => {
-                    let ns_str = val.strip_suffix("ns").unwrap_or(val);
-                    info.ts_resolution_ns = ns_str.parse().context("invalid ts_res")?;
-                }
-                "pattern" => {
-                    info.max_pattern_steps = val.parse().context("invalid pattern")?;
-                }
-                "ring" => info.ts_ring_events = val.parse().context("invalid ring")?,
-                "feat" => {
-                    info.features = parse_hex_or_dec(val).context("invalid feat")? as u32;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    Ok(info)
-}
-
-pub fn parse_device_info(data: &str) -> Result<DeviceInfoResult> {
-    let mut uid = String::new();
-    let mut devnum: Option<u8> = None;
-
-    for part in data.split_whitespace() {
-        if let Some(val) = part.strip_prefix("uid=") {
-            uid = val.to_string();
-        } else if let Some(val) = part.strip_prefix("devnum=") {
-            let n: u16 = val.parse().context("invalid devnum")?;
-            devnum = if n == 255 { None } else { Some(n as u8) };
-        }
-    }
-
-    if uid.is_empty() {
-        bail!("missing uid in info response");
-    }
-
-    Ok(DeviceInfoResult {
-        uid,
-        device_number: devnum,
-    })
-}
-
-fn parse_hex_or_dec(s: &str) -> Result<u64> {
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u64::from_str_radix(hex, 16).context("invalid hex")
-    } else {
-        s.parse::<u64>().context("invalid number")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pochi_sdk::{FEAT_RESET, FEAT_SYNC};
 
-    #[test]
-    fn parse_version_basic() {
-        let v = parse_version("v0.1.0 proto=1").unwrap();
-        assert_eq!(v.firmware, "v0.1.0");
-        assert_eq!(v.protocol, 1);
+    fn caps(features: u32) -> Capabilities {
+        Capabilities {
+            dio: 25,
+            out: 12,
+            r#in: 13,
+            ts_res_ns: 40,
+            tick_ns: 200,
+            pattern_max: 256,
+            ring: 256,
+            features,
+        }
+    }
+
+    fn device(devnum: Option<u8>) -> DeviceInfo {
+        DeviceInfo {
+            uid: "UID".into(),
+            device_number: devnum,
+            port: "port".into(),
+            version: None,
+        }
     }
 
     #[test]
-    fn parse_caps_basic() {
-        let c =
-            parse_caps("dio=23 out=12 in=11 ts_res=1000ns pattern=256 ring=256 feat=0x00000001")
-                .unwrap();
-        assert_eq!(c.max_dio, 23);
-        assert_eq!(c.out_count, 12);
-        assert_eq!(c.in_count, 11);
-        assert_eq!(c.ts_resolution_ns, 1000);
-        assert_eq!(c.max_pattern_steps, 256);
-        assert_eq!(c.ts_ring_events, 256);
-        assert_eq!(c.features, 1);
+    fn feature_labels_name_each_bit() {
+        assert_eq!(feature_labels(&caps(FEAT_SYNC)), vec!["sync"]);
+        assert_eq!(feature_labels(&caps(FEAT_RESET)), vec!["reset"]);
+        assert_eq!(
+            feature_labels(&caps(FEAT_SYNC | FEAT_RESET)),
+            vec!["sync", "reset"]
+        );
+        assert!(feature_labels(&caps(0)).is_empty());
     }
 
     #[test]
-    fn parse_caps_zero_outputs() {
-        let c = parse_caps("dio=23 out=0 in=23 ts_res=1000ns pattern=256 ring=256 feat=0x00000001")
-            .unwrap();
-        assert_eq!(c.out_count, 0);
-        assert_eq!(c.in_count, 23);
+    fn firmware_is_formatted_with_v_prefix() {
+        let version = VersionInfo {
+            major: 0,
+            minor: 1,
+            patch: 3,
+            protocol_version: 2,
+        };
+        assert_eq!(format_firmware(&version), "v0.1.3");
     }
 
     #[test]
-    fn caps_feature_helpers() {
-        let only_sync =
-            parse_caps("dio=23 out=0 in=23 ts_res=40ns pattern=256 ring=256 feat=0x00000001")
-                .unwrap();
-        assert!(only_sync.has_sync());
-        assert!(!only_sync.has_reset());
-        assert_eq!(only_sync.feature_labels(), vec!["sync"]);
-
-        let sync_and_reset =
-            parse_caps("dio=23 out=0 in=23 ts_res=40ns pattern=256 ring=256 feat=0x00000003")
-                .unwrap();
-        assert!(sync_and_reset.has_sync());
-        assert!(sync_and_reset.has_reset());
-        assert_eq!(sync_and_reset.feature_labels(), vec!["sync", "reset"]);
-
-        let none =
-            parse_caps("dio=23 out=0 in=23 ts_res=40ns pattern=256 ring=256 feat=0x00000000")
-                .unwrap();
-        assert!(!none.has_sync());
-        assert!(!none.has_reset());
-        assert!(none.feature_labels().is_empty());
+    fn devnum_accepts_range_and_reset() {
+        assert_eq!(parse_devnum("0").unwrap(), 0);
+        assert_eq!(parse_devnum("254").unwrap(), 254);
+        assert_eq!(parse_devnum("reset").unwrap(), 255);
     }
 
     #[test]
-    fn parse_device_info_basic() {
-        let d = parse_device_info("uid=AABBCCDD11223344 devnum=42").unwrap();
-        assert_eq!(d.uid, "AABBCCDD11223344");
-        assert_eq!(d.device_number, Some(42));
+    fn devnum_rejects_255_overflow_and_garbage() {
+        assert!(parse_devnum("255").is_err());
+        assert!(parse_devnum("256").is_err());
+        assert!(parse_devnum("-1").is_err());
+        assert!(parse_devnum("x").is_err());
     }
 
     #[test]
-    fn parse_device_info_unassigned() {
-        let d = parse_device_info("uid=AABBCCDD11223344 devnum=255").unwrap();
-        assert_eq!(d.device_number, None);
+    fn auto_assignment_skips_used_numbers() {
+        let devices = vec![device(Some(0)), device(None), device(Some(2)), device(None)];
+        assert_eq!(
+            plan_auto_assignment(&devices).unwrap(),
+            vec![(1, 1), (3, 3)]
+        );
     }
 
     #[test]
-    fn parse_hex_or_dec_works() {
-        assert_eq!(parse_hex_or_dec("42").unwrap(), 42);
-        assert_eq!(parse_hex_or_dec("0xFF").unwrap(), 255);
-        assert_eq!(parse_hex_or_dec("0x00000001").unwrap(), 1);
+    fn auto_assignment_with_nothing_to_do_is_empty() {
+        let devices = vec![device(Some(4)), device(Some(5))];
+        assert!(plan_auto_assignment(&devices).unwrap().is_empty());
+    }
+
+    #[test]
+    fn auto_assignment_fails_when_all_numbers_are_taken() {
+        let mut devices: Vec<DeviceInfo> = (0..=254u8).map(|n| device(Some(n))).collect();
+        devices.push(device(None));
+        assert!(plan_auto_assignment(&devices).is_err());
     }
 }

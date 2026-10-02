@@ -1,11 +1,6 @@
-mod commands;
-mod device;
-mod output;
-mod reconcile;
-mod toml_convert;
-mod transport;
-
 use clap::{Parser, Subcommand};
+use pochi::{commands, device, exit, output};
+use pochi_sdk::TS_GET_MAX;
 use std::process;
 
 #[derive(Parser)]
@@ -120,10 +115,12 @@ enum Command {
 enum MapAction {
     /// Show current pin map
     Show,
-    /// Set pin map from hex string (48 or 64 hex chars = 24 or 32 bytes)
+    /// Set the pin map from KEY=VALUE pairs (all eight keys are required)
     Set {
-        /// Map data as hex string
-        hex: String,
+        /// flags, dir, pu, pd, def, opol, ipol, edge — masks as hex or decimal
+        /// (e.g. flags=0x00 dir=0x0f pu=0 pd=0x0c7fff00 def=0 opol=0 ipol=0 edge=0x0c7ffff0)
+        #[arg(required = true, value_name = "KEY=VALUE")]
+        args: Vec<String>,
     },
     /// Load pin map from TOML file
     Load {
@@ -132,19 +129,21 @@ enum MapAction {
     },
     /// Save current map to flash
     Save,
-    /// Load default map (all 25 channels input)
+    /// Load default map (all 25 channels input, pull-down)
     Default,
 }
 
 #[derive(Subcommand)]
 enum PatternAction {
-    /// Load pattern from hex data
-    LoadHex {
-        /// Pattern data as hex string
-        hex: String,
+    /// Append steps to the pattern buffer
+    Add {
+        /// Steps as <out_bits>:<hold_ticks> (1 tick = 200 ns), e.g. 0x1:5 0x0:5
+        #[arg(required = true, value_name = "STEP")]
+        steps: Vec<String>,
     },
-    /// Load pattern from TOML file
-    Load {
+    /// Upload a TOML pattern file, replacing the pattern buffer
+    #[command(alias = "load")]
+    Upload {
         /// Path to TOML pattern file
         file: String,
     },
@@ -174,10 +173,12 @@ enum TsAction {
         /// Edge mode: rising, falling, or both
         mode: String,
     },
+    /// Show capture state and the number of pending events
+    Status,
     /// Get captured timestamps
     Get {
-        /// Maximum events to retrieve
-        #[arg(default_value = "256")]
+        /// Maximum events to retrieve (1-85 per call)
+        #[arg(default_value_t = TS_GET_MAX)]
         max_events: u16,
         /// Reconcile µs-boundary straddles across channels (groups events
         /// by count proximity and corrects DMA latch inconsistencies)
@@ -238,31 +239,31 @@ fn selector(cli: &Cli) -> device::DeviceSelector {
 }
 
 fn main() {
-    let cli = Cli::parse();
-    let result = run(&cli);
-
-    match result {
-        Ok(()) => {}
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
         Err(e) => {
-            let err_msg = format!("{e:#}");
-            if cli.json {
-                let _ = output::print_json(&serde_json::json!({"error": err_msg}));
+            // `--help` / `--version` are printed to stdout and succeed; a
+            // usage error is an argument error (exit code 3), not clap's 2.
+            let code = if e.use_stderr() {
+                exit::EXIT_ARGUMENT
             } else {
-                eprintln!("Error: {err_msg}");
-            }
-
-            let code = if err_msg.contains("device error") {
-                1
-            } else if err_msg.contains("failed to open")
-                || err_msg.contains("no Pochi-DIO device")
-                || err_msg.contains("disconnected")
-            {
-                2
-            } else {
-                3
+                0
             };
+            let _ = e.print();
             process::exit(code);
         }
+    };
+
+    if let Err(e) = run(&cli) {
+        let err_msg = format!("{e:#}");
+        if cli.json {
+            // Reporting the error is all that is left to do; if even stdout
+            // is unwritable the exit code below still tells the story.
+            let _ = output::print_json(&serde_json::json!({"error": err_msg}));
+        } else {
+            eprintln!("Error: {err_msg}");
+        }
+        process::exit(exit::exit_code(&e));
     }
 }
 
@@ -277,7 +278,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Command::Devnum { value } => commands::info::run_devnum(&sel, value, cli.json),
         Command::Map { action } => match action {
             MapAction::Show => commands::map::run_show(&sel, cli.json),
-            MapAction::Set { hex } => commands::map::run_set(&sel, hex, cli.json),
+            MapAction::Set { args } => commands::map::run_set(&sel, args, cli.json),
             MapAction::Load { file } => commands::map::run_load(&sel, file, cli.json),
             MapAction::Save => commands::map::run_save(&sel, cli.json),
             MapAction::Default => commands::map::run_default(&sel, cli.json),
@@ -287,8 +288,10 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Command::State => commands::io::run_state(&sel, cli.json),
         Command::Watch => commands::io::run_watch(&sel, cli.json),
         Command::Pattern { action } => match action {
-            PatternAction::LoadHex { hex } => commands::pattern::run_load_hex(&sel, hex, cli.json),
-            PatternAction::Load { file } => commands::pattern::run_load_file(&sel, file, cli.json),
+            PatternAction::Add { steps } => commands::pattern::run_add(&sel, steps, cli.json),
+            PatternAction::Upload { file } => {
+                commands::pattern::run_load_file(&sel, file, cli.json)
+            }
             PatternAction::Run {
                 r#loop: loop_mode,
                 repeat,
@@ -301,6 +304,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             TsAction::Arm { mask, mode } => {
                 commands::timestamp::run_arm(&sel, mask, mode, cli.json)
             }
+            TsAction::Status => commands::timestamp::run_status(&sel, cli.json),
             TsAction::Get {
                 max_events,
                 reconcile,
