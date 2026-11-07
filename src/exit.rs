@@ -26,6 +26,10 @@ pub fn exit_code(err: &anyhow::Error) -> i32 {
         | SdkError::SyncTimeout
         | SdkError::NoResource
         | SdkError::NotRunning
+        | SdkError::Failsafe
+        | SdkError::Exclusive { .. }
+        | SdkError::TransportNotSupported
+        | SdkError::SafetyMismatch(_)
         | SdkError::UnknownDevice(_) => EXIT_DEVICE_ERROR,
         SdkError::Connection(_)
         | SdkError::Io(_)
@@ -53,6 +57,23 @@ mod tests {
         assert_eq!(code(SdkError::NotRunning), EXIT_DEVICE_ERROR);
         assert_eq!(
             code(SdkError::UnknownDevice("FOO".into())),
+            EXIT_DEVICE_ERROR
+        );
+    }
+
+    #[test]
+    fn safety_errors_exit_1() {
+        assert_eq!(code(SdkError::Failsafe), EXIT_DEVICE_ERROR);
+        assert_eq!(
+            code(SdkError::Exclusive {
+                group: 1,
+                mask: 0xc
+            }),
+            EXIT_DEVICE_ERROR
+        );
+        assert_eq!(code(SdkError::TransportNotSupported), EXIT_DEVICE_ERROR);
+        assert_eq!(
+            code(SdkError::SafetyMismatch("wdog_ms".into())),
             EXIT_DEVICE_ERROR
         );
     }

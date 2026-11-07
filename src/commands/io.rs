@@ -85,6 +85,7 @@ pub fn format_event(event: &PushEvent) -> String {
         }
         PushEvent::PatternDone { loops } => format!("PATTERN_DONE loops={loops}"),
         PushEvent::PatternTimeout { loops } => format!("PATTERN_TIMEOUT loops={loops}"),
+        PushEvent::Failsafe { cause } => format!("FAILSAFE cause={}", cause.as_str()),
         PushEvent::Unknown { raw } => format!("UNKNOWN {raw}"),
     }
 }
@@ -177,6 +178,7 @@ pub fn watch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pochi_sdk::FailsafeCause;
     use std::sync::mpsc;
 
     /// Heartbeat interval that never fires within a test.
@@ -198,6 +200,18 @@ mod tests {
         assert_eq!(
             format_event(&PushEvent::PatternTimeout { loops: 7 }),
             "PATTERN_TIMEOUT loops=7"
+        );
+        assert_eq!(
+            format_event(&PushEvent::Failsafe {
+                cause: FailsafeCause::Wdog
+            }),
+            "FAILSAFE cause=wdog"
+        );
+        assert_eq!(
+            format_event(&PushEvent::Failsafe {
+                cause: FailsafeCause::Usb
+            }),
+            "FAILSAFE cause=usb"
         );
         assert_eq!(
             format_event(&PushEvent::Unknown {
