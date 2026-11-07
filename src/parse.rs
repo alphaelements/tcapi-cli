@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use anyhow::{bail, Context, Result};
-use pochi_sdk::{EdgeMode, PatternStep, PinMap};
+use pochi_sdk::{EdgeMode, PatternStep, PinMap, WDOG_MAX_MS, WDOG_MIN_MS};
 
 /// Parse an unsigned 32-bit number written as `0x` hex or decimal.
 pub fn parse_u32(text: &str) -> Result<u32> {
@@ -17,6 +17,22 @@ pub fn parse_u32(text: &str) -> Result<u32> {
     parsed.with_context(|| {
         format!("invalid number {text:?} (expected decimal or 0x hex, max 32 bits)")
     })
+}
+
+/// Parse a watchdog timeout for `wdog`: milliseconds (decimal or `0x` hex),
+/// or `off` for 0 (disabled). Only 0 and `WDOG_MIN_MS..=WDOG_MAX_MS` are
+/// accepted, so a bad value is an input error before any connection is
+/// opened (the SDK checks it again before sending).
+pub fn parse_wdog(text: &str) -> Result<u32> {
+    if text.trim().eq_ignore_ascii_case("off") {
+        return Ok(0);
+    }
+    let ms =
+        parse_u32(text).context("invalid watchdog timeout (expected milliseconds or 'off')")?;
+    if ms != 0 && !(WDOG_MIN_MS..=WDOG_MAX_MS).contains(&ms) {
+        bail!("watchdog timeout {ms} ms is out of range (0 to disable, or {WDOG_MIN_MS}-{WDOG_MAX_MS})");
+    }
+    Ok(ms)
 }
 
 /// Parse `rising`, `falling` or `both` (case-insensitive).
@@ -99,6 +115,32 @@ pub fn parse_map_args(args: &[String]) -> Result<PinMap> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wdog_accepts_milliseconds_hex_and_off() {
+        assert_eq!(parse_wdog("500").unwrap(), 500);
+        assert_eq!(parse_wdog("0x64").unwrap(), 100);
+        assert_eq!(parse_wdog("0").unwrap(), 0);
+        assert_eq!(parse_wdog("off").unwrap(), 0);
+        assert_eq!(parse_wdog("OFF").unwrap(), 0);
+        assert_eq!(parse_wdog("100").unwrap(), 100);
+        assert_eq!(parse_wdog("10000").unwrap(), 10_000);
+    }
+
+    #[test]
+    fn wdog_rejects_values_the_device_would_refuse() {
+        for bad in ["1", "99", "10001"] {
+            let err = parse_wdog(bad).unwrap_err().to_string();
+            assert!(err.contains("out of range"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn wdog_rejects_garbage_and_negative_values() {
+        for bad in ["", "abc", "-1", "1.5", "4294967296"] {
+            assert!(parse_wdog(bad).is_err(), "{bad:?} should be rejected");
+        }
+    }
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()

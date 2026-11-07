@@ -29,6 +29,30 @@ pochi version
 pochi raw "help"
 ```
 
+## Safety Functions
+
+```bash
+pochi outputs reset              # every output to its default (def); there is no "alloff"
+pochi safety status              # watchdog, failsafe latch, usbsafe, exclusive groups
+pochi safety apply safety.toml   # excl, usbsafe, then wdog; verified by read-back
+pochi safety hold                # feed the watchdog until Ctrl+C (outputs unchanged)
+pochi wdog 500                   # 100-10000 ms, 0 / off disables
+pochi failsafe clear
+pochi excl set 0x0c 0x30         # pins of one group are never ON together
+pochi excl get
+pochi usbsafe on
+pochi rstinfo
+```
+
+Every `pochi` run connects and exits, so a watchdog enabled with `wdog` or
+`safety apply` **trips the device once that process has ended** and the timeout has
+elapsed (outputs go to their defaults, the failsafe latch is set). Keep it fed with
+`pochi safety hold`. Settings are volatile: they are off after every restart.
+
+Exit codes: 0 ok, 1 device error, 2 connection error, 3 argument error,
+4 `ERR FAILSAFE` (failsafe latch refuses the command), 5 `ERR EXCLUSIVE` (an exclusive
+group would be violated; `--json` carries `kind`, `group` and `mask`).
+
 ## Device Selection
 
 ```bash

@@ -160,6 +160,8 @@ impl Script {
 /// How long the fake device lingers before it hangs up.
 const DRAIN_BEFORE_CLOSE: Duration = Duration::from_millis(300);
 
+type Overrides = Arc<Mutex<HashMap<String, Vec<String>>>>;
+
 static PTY_PAIR_LOCK: Mutex<()> = Mutex::new(());
 
 /// A running fake device. Dropping it stops the thread.
@@ -168,6 +170,8 @@ static PTY_PAIR_LOCK: Mutex<()> = Mutex::new(());
 /// path would fail while asserting DTR (a PTY has no modem lines).
 pub struct FakeDevice {
     commands: Arc<Mutex<Vec<String>>>,
+    /// Replies installed while the device runs; they win over the script.
+    overrides: Overrides,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
@@ -197,10 +201,12 @@ impl FakeDevice {
         };
         let commands = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
+        let overrides: Overrides = Arc::new(Mutex::new(HashMap::new()));
 
         let handle = std::thread::spawn({
             let commands = Arc::clone(&commands);
             let stop = Arc::clone(&stop);
+            let overrides = Arc::clone(&overrides);
             move || {
                 master
                     .set_timeout(Duration::from_millis(20))
@@ -224,7 +230,8 @@ impl FakeDevice {
                         }
                         commands.lock().expect("commands").push(request.clone());
                         let key = request.trim().to_lowercase();
-                        let mut lines = script.answer(&request);
+                        let overridden = overrides.lock().expect("overrides").get(&key).cloned();
+                        let mut lines = overridden.unwrap_or_else(|| script.answer(&request));
                         if let Some(extra) = script.trailing.get(&key) {
                             lines.extend(extra.iter().cloned());
                         }
@@ -246,11 +253,20 @@ impl FakeDevice {
         (
             Self {
                 commands,
+                overrides,
                 stop,
                 handle: Some(handle),
             },
             slave,
         )
+    }
+
+    /// From now on answer `request` with `lines`, whatever the script says.
+    pub fn set_reply(&self, request: &str, lines: Vec<String>) {
+        self.overrides
+            .lock()
+            .expect("overrides")
+            .insert(request.to_lowercase(), lines);
     }
 
     /// Every request line received so far.

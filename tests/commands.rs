@@ -2,6 +2,8 @@
 //! responses from the golden transcripts (`protocol/golden/`), so the wire
 //! text is never written by hand here.
 
+#[path = "commands/safety.rs"]
+mod safety;
 mod support;
 
 use std::path::PathBuf;
