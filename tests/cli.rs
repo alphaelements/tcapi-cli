@@ -152,3 +152,82 @@ fn ts_arm_rejects_an_unknown_edge_mode() {
 fn devnum_rejects_255() {
     pochi(&["devnum", "255"]).assert().code(3);
 }
+
+fn help_of(args: &[&str]) -> String {
+    let out = Command::cargo_bin("pochi")
+        .unwrap()
+        .args(args)
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    String::from_utf8(out.stdout).expect("utf-8 help")
+}
+
+#[test]
+fn top_level_help_lists_the_safety_commands() {
+    let help = help_of(&["--help"]);
+    for command in [
+        "outputs", "safety", "wdog", "failsafe", "excl", "usbsafe", "rstinfo",
+    ] {
+        assert!(
+            help.lines().any(|l| l.trim_start().starts_with(command)),
+            "{command} missing from\n{help}"
+        );
+    }
+}
+
+#[test]
+fn outputs_has_reset_and_no_alloff() {
+    let help = help_of(&["outputs", "--help"]);
+    assert!(help.contains("reset"), "{help}");
+    assert!(!help.to_lowercase().contains("alloff"), "{help}");
+    Command::cargo_bin("pochi")
+        .unwrap()
+        .args(["outputs", "alloff"])
+        .assert()
+        .code(3);
+}
+
+#[test]
+fn wdog_help_says_it_trips_when_the_process_ends() {
+    let help = help_of(&["wdog", "--help"]);
+    assert!(
+        help.contains("trips the device once this process has ended"),
+        "{help}"
+    );
+    assert!(help.contains("safety hold"), "{help}");
+}
+
+#[test]
+fn safety_subcommands_document_the_watchdog_caveat() {
+    let apply = help_of(&["safety", "apply", "--help"]);
+    assert!(
+        apply.contains("excl set") && apply.contains("safety hold"),
+        "{apply}"
+    );
+    let hold = help_of(&["safety", "hold", "--help"]);
+    assert!(
+        hold.contains("Ctrl+C") && hold.contains("without changing"),
+        "{hold}"
+    );
+}
+
+#[test]
+fn wdog_out_of_range_is_an_argument_error_before_any_connection() {
+    pochi(&["wdog", "99"]).assert().code(3);
+    pochi(&["wdog", "abc"]).assert().code(3);
+}
+
+#[test]
+fn excl_set_needs_at_least_one_mask() {
+    pochi(&["excl", "set"]).assert().code(3);
+}
+
+#[test]
+fn safety_apply_rejects_a_bad_file_before_any_connection() {
+    pochi(&["safety", "apply", &fixture("safety-pin-duplicate.toml")])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("safety-pin-duplicate.toml"));
+}

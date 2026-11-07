@@ -1,5 +1,5 @@
-use clap::{Parser, Subcommand};
-use pochi::{commands, device, exit, output};
+use clap::{Parser, Subcommand, ValueEnum};
+use pochi::{commands, device, exit, output, parse};
 use pochi_sdk::TS_GET_MAX;
 use std::process;
 
@@ -109,6 +109,122 @@ enum Command {
 
     /// Interactive REPL mode
     Interactive,
+
+    /// Output operations
+    Outputs {
+        #[command(subcommand)]
+        action: OutputsAction,
+    },
+
+    /// Safety settings: show, apply a safety.toml, keep the watchdog fed
+    Safety {
+        #[command(subcommand)]
+        action: SafetyAction,
+    },
+
+    /// Set the watchdog timeout (100-10000 ms, 0 or 'off' disables it)
+    #[command(long_about = WDOG_HELP)]
+    Wdog {
+        /// Timeout in milliseconds (100-10000), or 0 / 'off' to disable
+        timeout: String,
+    },
+
+    /// Failsafe latch operations
+    Failsafe {
+        #[command(subcommand)]
+        action: FailsafeAction,
+    },
+
+    /// Exclusive output groups (pins of a group are never ON together)
+    Excl {
+        #[command(subcommand)]
+        action: ExclAction,
+    },
+
+    /// Failsafe when the USB link is lost (volatile, off after every restart)
+    Usbsafe {
+        /// 'on' trips the failsafe on USB loss, 'off' ignores it
+        state: OnOff,
+    },
+
+    /// Show the cause of the last restart, the uptime and the boot id
+    Rstinfo,
+}
+
+/// Help of `wdog`: the one-shot-process caveat must be visible.
+const WDOG_HELP: &str = "Set the watchdog timeout (100-10000 ms; 0 or 'off' disables it).
+
+Once enabled, the device trips when no command is answered for the timeout: \
+every output goes to its default (def), the failsafe latch is set and stays \
+set until 'pochi failsafe clear'. Each pochi invocation connects, runs and \
+exits, so a watchdog enabled here trips the device once this process has \
+ended and the timeout has elapsed. Run 'pochi safety hold' to keep it fed \
+until Ctrl+C. The setting is volatile: it is off again after every restart.";
+
+#[derive(Clone, Copy, ValueEnum)]
+enum OnOff {
+    On,
+    Off,
+}
+
+#[derive(Subcommand)]
+enum OutputsAction {
+    /// Return every output to its default (def) and stop a running pattern;
+    /// works with the failsafe latch set and does not release it
+    Reset,
+}
+
+#[derive(Subcommand)]
+enum SafetyAction {
+    /// Show the watchdog, failsafe latch, usbsafe and exclusive group count
+    Status,
+    /// Apply a safety.toml (excl, usbsafe, then wdog) and verify it
+    #[command(long_about = APPLY_HELP)]
+    Apply {
+        /// Path to the safety.toml file
+        file: String,
+    },
+    /// Keep the enabled watchdog fed until Ctrl+C (outputs are not changed)
+    #[command(long_about = HOLD_HELP)]
+    Hold,
+}
+
+const APPLY_HELP: &str = "Apply a safety.toml and verify it.
+
+The commands are sent in this order: 'excl set' (or 'excl clear' when the file \
+has no groups), 'usbsafe on|off', 'wdog <ms>'. The first error stops the apply; \
+settings accepted before it stay in effect. The pins of the groups must \
+already be outputs (apply the map first). If the file enables the watchdog, \
+the device trips when this process has ended and the timeout has elapsed; \
+run 'pochi safety hold' to keep it fed.";
+
+const HOLD_HELP: &str = "Keep the enabled watchdog fed until Ctrl+C.
+
+Sends a heartbeat (ping every quarter of the timeout, at most 1 s) and checks \
+the failsafe latch once a second. Ctrl+C ends the command without changing \
+any output; the watchdog then trips after its timeout, as it does for any \
+host that goes away. Fails if the watchdog is disabled (exit code 3) or the \
+latch is already set (exit code 4), and exits with code 4 when the latch is \
+set while holding.";
+
+#[derive(Subcommand)]
+enum FailsafeAction {
+    /// Release the failsafe latch (outputs stay at their defaults)
+    Clear,
+}
+
+#[derive(Subcommand)]
+enum ExclAction {
+    /// Replace all groups; each mask names 2 or more output pins (max 16 groups)
+    Set {
+        /// Group masks as hex or decimal, e.g. 0x0c 0x30
+        #[arg(required = true, value_name = "MASK")]
+        masks: Vec<String>,
+    },
+    /// Remove all groups
+    Clear,
+    /// List the groups
+    Get,
 }
 
 #[derive(Subcommand)]
@@ -259,7 +375,7 @@ fn main() {
         if cli.json {
             // Reporting the error is all that is left to do; if even stdout
             // is unwritable the exit code below still tells the story.
-            let _ = output::print_json(&serde_json::json!({"error": err_msg}));
+            let _ = output::print_json(&exit::error_json(&e));
         } else {
             eprintln!("Error: {err_msg}");
         }
@@ -335,5 +451,28 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         Command::Reset { yes } => commands::reset::run_system_reset(&sel, *yes, cli.json),
         Command::Bootsel { yes } => commands::reset::run_bootsel(&sel, *yes, cli.json),
         Command::Interactive => commands::raw::run_interactive(&sel),
+        Command::Outputs { action } => match action {
+            OutputsAction::Reset => commands::safety::run_outputs_reset(&sel, cli.json),
+        },
+        Command::Safety { action } => match action {
+            SafetyAction::Status => commands::safety::run_status(&sel, cli.json),
+            SafetyAction::Apply { file } => commands::safety::run_apply(&sel, file, cli.json),
+            SafetyAction::Hold => commands::safety::run_hold(&sel, cli.json),
+        },
+        Command::Wdog { timeout } => {
+            commands::safety::run_wdog(&sel, parse::parse_wdog(timeout)?, cli.json)
+        }
+        Command::Failsafe { action } => match action {
+            FailsafeAction::Clear => commands::safety::run_failsafe_clear(&sel, cli.json),
+        },
+        Command::Excl { action } => match action {
+            ExclAction::Set { masks } => commands::safety::run_excl_set(&sel, masks, cli.json),
+            ExclAction::Clear => commands::safety::run_excl_clear(&sel, cli.json),
+            ExclAction::Get => commands::safety::run_excl_get(&sel, cli.json),
+        },
+        Command::Usbsafe { state } => {
+            commands::safety::run_usbsafe(&sel, matches!(state, OnOff::On), cli.json)
+        }
+        Command::Rstinfo => commands::safety::run_rstinfo(&sel, cli.json),
     }
 }

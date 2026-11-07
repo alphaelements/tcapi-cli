@@ -1,0 +1,35 @@
+# udev rules for Pochi devices (Pochi-DIO: VID 0x2E8A, PID 0x000A).
+#
+# Install:
+#   sudo install -m 0644 packaging/udev/99-pochi.rules /etc/udev/rules.d/99-pochi.rules
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   (unplug and re-plug the device if it was connected while you did this)
+#
+# Check the syntax:   udevadm verify packaging/udev/99-pochi.rules
+#
+# What the rules do:
+#   1. Give the logged-in desktop user access to the serial port (uaccess), and
+#      members of the "dialout" group access when nobody is logged in at the seat
+#      (SSH, services). On Arch-based distributions the group is "uucp": change
+#      GROUP below.
+#   2. Tell ModemManager the device is not a modem. Otherwise ModemManager probes
+#      the port with AT commands, which delays the port and can interleave with
+#      your own commands.
+#   3. Keep USB autosuspend off. Suspending the link does not change the outputs,
+#      but the resume delay shows up as command timeouts, and a watchdog (wdog)
+#      trips when no command is answered within its timeout.
+
+# 1. Serial port (CDC) and raw HID access.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000a", TAG+="uaccess", MODE="0660", GROUP="dialout"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000a", TAG+="uaccess", MODE="0660", GROUP="dialout"
+
+# 2. ModemManager must leave the device alone.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000a", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000a", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# 3. No USB autosuspend for the device.
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="000a", TEST=="power/control", ATTR{power/control}="on"
+
+# BOOTSEL mode (RP2350 boot ROM, PID 0x000F): lets picotool talk to the device as the
+# logged-in user. Copying a UF2 to the mass-storage drive needs no rule.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000f", TAG+="uaccess", MODE="0660", GROUP="dialout"
