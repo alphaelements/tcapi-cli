@@ -1,6 +1,6 @@
 # Pochi CLI
 
-Cross-platform command-line tool for [Pochi-DIO](http://gitlab.home:8888/apro/eda/pochi-dio) — an RP2350-based high-speed digital I/O unit.
+Cross-platform command-line tool for Pochi-DIO — an RP2350-based high-speed digital I/O unit.
 
 ## Features
 
@@ -116,9 +116,8 @@ See `docs/firmware-update.md` in the `pochi-tools` repository (also lists the fi
 
 ## Documentation
 
-- **User Guide**: [Wiki](http://gitlab.home:8888/apro/eda/pochi-cli/-/wikis/home) (日本語 / English)
-- **Dev Spec**: [pochi-dio/docs/55-cli-spec.md](http://gitlab.home:8888/apro/eda/pochi-dio/-/blob/main/docs/55-cli-spec.md)
-- **FW Protocol**: [pochi-dio/docs/30-usb-protocol.md](http://gitlab.home:8888/apro/eda/pochi-dio/-/blob/main/docs/30-usb-protocol.md)
+- **CLI Usage**: See the sections above and `pochi --help` / `pochi <subcommand> --help`
+- **Firmware Update**: See [`docs/firmware-update.md`](https://github.com/alphaelements/pochi-tools/blob/main/docs/firmware-update.md) in the pochi-tools repository
 
 ## License
 
