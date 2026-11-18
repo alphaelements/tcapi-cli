@@ -15,8 +15,15 @@ security-gate:
   image: rust:latest
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
+  variables:
+    CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
+  cache:
+    key: security-tools
+    paths:
+      - .cargo/bin/
+      - .cargo/registry/
   before_script:
-    - cargo install cargo-audit --locked 2>/dev/null || true
+    - cargo install cargo-audit --locked
   script:
     - cargo audit
     - |
