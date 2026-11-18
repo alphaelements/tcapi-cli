@@ -4,8 +4,11 @@ stages:
 
 # Local-first quality model: lefthook pre-commit/pre-push runs all checks.
 # CI owns deploy-stage work that cannot run locally:
-#   security-gate — cargo audit + deny + secret scan (blocks mirror on failure)
+#   security-gate — cargo audit + secret scan (blocks mirror on failure)
 #   mirror-main   — push main to the GitHub public repo on every merge.
+#
+# cargo deny runs locally via lefthook (needs the full workspace for path
+# deps). CI uses cargo audit which works from Cargo.lock alone.
 
 security-gate:
   stage: gate
@@ -13,10 +16,9 @@ security-gate:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   before_script:
-    - cargo install cargo-audit cargo-deny --locked 2>/dev/null || true
+    - cargo install cargo-audit --locked 2>/dev/null || true
   script:
     - cargo audit
-    - cargo deny check
     - |
       if git log --all -p | grep -qiE '(@gmail\.com|@yahoo\.com|@hotmail\.com|PRIVATE.TOKEN|AKIA[A-Z0-9]{16}|BEGIN (RSA|OPENSSH) PRIVATE KEY)'; then
         echo "ERROR: potential secret detected in git history"
