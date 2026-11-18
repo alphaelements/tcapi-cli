@@ -1,4 +1,4 @@
-# udev rules for Pochi devices (Pochi-DIO: VID 0x2E8A, PID 0x000A).
+# udev rules for Pochi devices (Pochi-DIO: VID 0x2E8A, PID 0x1175).
 #
 # Install:
 #   sudo install -m 0644 packaging/udev/99-pochi.rules /etc/udev/rules.d/99-pochi.rules
@@ -20,15 +20,15 @@
 #      trips when no command is answered within its timeout.
 
 # 1. Serial port (CDC) and raw HID access.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000a", TAG+="uaccess", MODE="0660", GROUP="dialout"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000a", TAG+="uaccess", MODE="0660", GROUP="dialout"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="1175", TAG+="uaccess", MODE="0660", GROUP="dialout"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="1175", TAG+="uaccess", MODE="0660", GROUP="dialout"
 
 # 2. ModemManager must leave the device alone.
-SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000a", ENV{ID_MM_DEVICE_IGNORE}="1"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="000a", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="1175", ENV{ID_MM_DEVICE_IGNORE}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="1175", ENV{ID_MM_DEVICE_IGNORE}="1"
 
 # 3. No USB autosuspend for the device.
-ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="000a", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="1175", TEST=="power/control", ATTR{power/control}="on"
 
 # BOOTSEL mode (RP2350 boot ROM, PID 0x000F): lets picotool talk to the device as the
 # logged-in user. Copying a UF2 to the mass-storage drive needs no rule.

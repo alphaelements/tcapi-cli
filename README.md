@@ -81,7 +81,7 @@ sudo usermod -aG dialout "$USER"      # only for sessions without a seat (SSH, s
 ```
 
 Unplug and re-plug the device afterwards. [`packaging/udev/99-pochi.rules`](packaging/udev/99-pochi.rules)
-(VID `2e8a`, PID `000a`) does four things:
+(VID `2e8a`, PID `1175`) does four things:
 
 | Setting | Why |
 |---|---|
