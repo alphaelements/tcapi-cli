@@ -1,0 +1,38 @@
+stages:
+  - gate
+  - deploy
+
+# Local-first quality model: lefthook pre-commit/pre-push runs all checks.
+# CI owns deploy-stage work that cannot run locally:
+#   security-gate — cargo audit + deny + secret scan (blocks mirror on failure)
+#   mirror-main   — push main to the GitHub public repo on every merge.
+
+security-gate:
+  stage: gate
+  image: rust:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    - cargo install cargo-audit cargo-deny --locked 2>/dev/null || true
+  script:
+    - cargo audit
+    - cargo deny check
+    - |
+      if git log --all -p | grep -qiE '(@gmail\.com|@yahoo\.com|@hotmail\.com|PRIVATE.TOKEN|AKIA[A-Z0-9]{16}|BEGIN (RSA|OPENSSH) PRIVATE KEY)'; then
+        echo "ERROR: potential secret detected in git history"
+        exit 1
+      fi
+
+mirror-main:
+  stage: deploy
+  needs: [security-gate]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  variables:
+    GIT_DEPTH: "0"
+    GITHUB_TOKEN: ${GITHUB_TOKEN}
+  script:
+    - 'GITHUB_TOKEN_CLEAN=$(printf "%s" "$GITHUB_TOKEN" | tr -d "[:space:]")'
+    - git remote remove github 2>/dev/null || true
+    - git remote add github "https://x-access-token:${GITHUB_TOKEN_CLEAN}@github.com/alphaelements/pochi-cli.git"
+    - git push github HEAD:main --force
