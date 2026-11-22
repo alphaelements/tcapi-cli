@@ -23,7 +23,7 @@ security-gate:
       - .cargo/bin/
       - .cargo/registry/
   before_script:
-    - cargo install cargo-audit --locked
+    - '[ -x "$CARGO_HOME/bin/cargo-audit" ] || cargo install cargo-audit --locked'
   script:
     - cargo audit
     - |
