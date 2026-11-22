@@ -22,7 +22,7 @@ check() {
 [[ -f "$RULES" ]] || { echo "NOT ok - $RULES does not exist"; exit 1; }
 
 check "matches the Tcapi VID" 'ATTRS{idVendor}=="2e8a"'
-check "matches the Tcapi PID" 'ATTRS{idProduct}=="000a"'
+check "matches the Tcapi PID" 'ATTRS{idProduct}=="1175"'
 check "uaccess for logged-in users" 'TAG+="uaccess"'
 check "dialout group for headless use" 'GROUP="dialout"'
 check "ModemManager is told to ignore the device" 'ENV{ID_MM_DEVICE_IGNORE}="1"'
