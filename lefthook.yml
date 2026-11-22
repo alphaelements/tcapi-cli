@@ -4,9 +4,13 @@ pre-commit:
     fmt:
       run: cargo fmt --all -- --check
     clippy:
-      run: cargo clippy -- -D warnings
+      run: cargo clippy --all-targets -- -D warnings
     test:
       run: cargo test
+    deny:
+      glob: "{Cargo.toml,Cargo.lock,deny.toml}"
+      run: cargo deny --locked check licenses bans sources
+      fail_text: "A dependency violates deny.toml (license, ban or source)."
     license-check:
       glob: "{LICENSE,README.md,Cargo.toml,scripts/check_license.py,tests/test_check_license.py}"
       run: python3 scripts/check_license.py --policy apache-2.0 && python3 -m unittest tests/test_check_license.py
