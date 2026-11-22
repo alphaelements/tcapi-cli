@@ -13,7 +13,7 @@ Two policies exist in the Tcapi family:
                   declares exactly `Apache-2.0` (no `MIT OR Apache-2.0`);
                   LICENSE-MIT / LICENSE-APACHE are gone.
 
-The dependency-license allow list (cargo-deny, "MIT/Apache-2.0 only") is a
+The dependency-license allow list (cargo-deny, `deny.toml` `[licenses].allow`) is a
 separate rule about third-party crates and is deliberately not touched here.
 
 Usage: check_license.py --policy {proprietary,apache-2.0} [--root DIR]

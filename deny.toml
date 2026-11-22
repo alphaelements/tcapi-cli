@@ -8,4 +8,14 @@ yanked = "warn"
 
 [licenses]
 version = 2
-allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016"]
+# Third-party dependency licenses only. The crate itself is Apache-2.0 only
+# (LICENSE); that is enforced by scripts/check_license.py.
+# MPL-2.0 is allowed for `serialport` (direct, and via the tcapi-sdk path
+# dependency) -- the same allowance as tcapi-tools/deny.toml.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "Unicode-3.0",
+    "MPL-2.0",
+]
