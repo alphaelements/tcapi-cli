@@ -395,33 +395,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
-name = "pochi"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap",
- "ctrlc",
- "pochi-sdk",
- "predicates",
- "serde",
- "serde_json",
- "serialport",
-]
-
-[[package]]
-name = "pochi-sdk"
-version = "0.1.0"
-dependencies = [
- "hex",
- "serde",
- "serde_json",
- "serialport",
- "thiserror",
- "toml",
-]
-
-[[package]]
 name = "predicates"
 version = "3.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -590,6 +563,33 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tcapi"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "ctrlc",
+ "predicates",
+ "serde",
+ "serde_json",
+ "serialport",
+ "tcapi-sdk",
+]
+
+[[package]]
+name = "tcapi-sdk"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "serialport",
+ "thiserror",
+ "toml",
 ]
 
 [[package]]

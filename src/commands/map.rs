@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use pochi_sdk::{ch_to_gp, config, Connection, PinMap, DIO_CHANNELS};
+use tcapi_sdk::{ch_to_gp, config, Connection, PinMap, DIO_CHANNELS};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
@@ -158,7 +158,7 @@ pub fn run_load(selector: &DeviceSelector, file: &str, json: bool) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pochi_sdk::VALID_DIO_MASK;
+    use tcapi_sdk::VALID_DIO_MASK;
 
     fn sample_map() -> PinMap {
         PinMap {
@@ -246,13 +246,13 @@ mod tests {
 
     #[test]
     fn load_map_file_reports_missing_file() {
-        let err = load_map_file("/nonexistent/pochi-map.toml").unwrap_err();
+        let err = load_map_file("/nonexistent/tcapi-map.toml").unwrap_err();
         assert!(err.to_string().contains("failed to read map file"));
     }
 
     #[test]
     fn load_map_file_reports_file_and_line_for_invalid_toml() {
-        let dir = std::env::temp_dir().join(format!("pochi-cli-map-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tcapi-cli-map-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("v1.toml");
         std::fs::write(&path, "version = 1\n").unwrap();

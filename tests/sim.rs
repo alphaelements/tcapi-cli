@@ -1,14 +1,14 @@
-//! The real `pochi` binary against the firmware simulator `pochi-dio-sim`
-//! (pochi-dio/sim, a pty running the firmware's protocol core on wall-clock
+//! The real `tcapi` binary against the firmware simulator `tcapi-dio-sim`
+//! (tcapi-dio/sim, a pty running the firmware's protocol core on wall-clock
 //! time). These tests start the actual binary, so exit codes, `--json`
 //! output and the watchdog timing are the ones a user sees.
 //!
-//! The simulator comes from `POCHI_DIO_SIM` (path to the binary) or is built
-//! from the sibling `../pochi-dio/sim` checkout. Without either (pochi-dio is
+//! The simulator comes from `TCAPI_DIO_SIM` (path to the binary) or is built
+//! from the sibling `../tcapi-dio/sim` checkout. Without either (tcapi-dio is
 //! a private repository) the tests print `SKIPPED` and pass.
 //!
 //! The SDK asserts DTR when it opens a port by path, which a pty answers with
-//! `ENOTTY`; `support/dtr_shim.c` is preloaded into the `pochi` process to
+//! `ENOTTY`; `support/dtr_shim.c` is preloaded into the `tcapi` process to
 //! accept that one request. Linux only.
 #![cfg(target_os = "linux")]
 
@@ -22,7 +22,7 @@ use std::time::Duration;
 use assert_cmd::Command;
 use predicates::prelude::*;
 
-const POCHI: &str = env!("CARGO_BIN_EXE_pochi");
+const TCAPI: &str = env!("CARGO_BIN_EXE_tcapi");
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -49,26 +49,26 @@ fn run_checked(command: &mut Process, what: &str) {
 fn sim_binary() -> Option<&'static Path> {
     static SIM: OnceLock<Option<PathBuf>> = OnceLock::new();
     SIM.get_or_init(|| {
-        if let Some(path) = std::env::var_os("POCHI_DIO_SIM") {
+        if let Some(path) = std::env::var_os("TCAPI_DIO_SIM") {
             let path = PathBuf::from(path);
-            assert!(path.is_file(), "POCHI_DIO_SIM {path:?} is not a file");
+            assert!(path.is_file(), "TCAPI_DIO_SIM {path:?} is not a file");
             return Some(path);
         }
-        let sim_dir = manifest_dir().join("../pochi-dio/sim");
+        let sim_dir = manifest_dir().join("../tcapi-dio/sim");
         if !sim_dir.join("Cargo.toml").is_file() {
             return None;
         }
         let host = host_triple();
-        let target_dir = manifest_dir().join("target/pochi-dio-sim");
+        let target_dir = manifest_dir().join("target/tcapi-dio-sim");
         run_checked(
             Process::new("cargo")
                 .args(["build", "--quiet", "--manifest-path"])
                 .arg(sim_dir.join("Cargo.toml"))
                 .args(["--target", &host, "--target-dir"])
                 .arg(&target_dir),
-            "building pochi-dio-sim",
+            "building tcapi-dio-sim",
         );
-        Some(target_dir.join(&host).join("debug/pochi-dio-sim"))
+        Some(target_dir.join(&host).join("debug/tcapi-dio-sim"))
     })
     .as_deref()
 }
@@ -89,7 +89,7 @@ fn host_triple() -> String {
 fn dtr_shim() -> &'static Path {
     static SHIM: OnceLock<PathBuf> = OnceLock::new();
     SHIM.get_or_init(|| {
-        let dir = manifest_dir().join("target/pochi-sim-shim");
+        let dir = manifest_dir().join("target/tcapi-sim-shim");
         std::fs::create_dir_all(&dir).expect("create shim dir");
         let lib = dir.join("dtr_shim.so");
         // Compile beside the target and rename: concurrent test runs never
@@ -117,14 +117,14 @@ struct Sim {
 impl Sim {
     fn start() -> Option<Self> {
         let Some(binary) = sim_binary() else {
-            eprintln!("SKIPPED: no pochi-dio-sim (set POCHI_DIO_SIM or check out pochi-dio)");
+            eprintln!("SKIPPED: no tcapi-dio-sim (set TCAPI_DIO_SIM or check out tcapi-dio)");
             return None;
         };
         let mut child = Process::new(binary)
             .arg("--wall-clock")
             .stdout(Stdio::piped())
             .spawn()
-            .expect("start pochi-dio-sim");
+            .expect("start tcapi-dio-sim");
         let mut port = String::new();
         BufReader::new(child.stdout.as_mut().expect("sim stdout"))
             .read_line(&mut port)
@@ -134,8 +134,8 @@ impl Sim {
         Some(Self { child, port })
     }
 
-    fn pochi(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new(POCHI);
+    fn tcapi(&self, args: &[&str]) -> Command {
+        let mut cmd = Command::new(TCAPI);
         cmd.env("LD_PRELOAD", dtr_shim())
             .args(["--port", &self.port])
             .args(args)
@@ -143,11 +143,11 @@ impl Sim {
         cmd
     }
 
-    /// Run `pochi args` and parse its `--json` stdout; it must succeed.
+    /// Run `tcapi args` and parse its `--json` stdout; it must succeed.
     fn json(&self, args: &[&str]) -> serde_json::Value {
         let mut all = vec!["--json"];
         all.extend_from_slice(args);
-        let out = self.pochi(&all).assert().success().get_output().clone();
+        let out = self.tcapi(&all).assert().success().get_output().clone();
         serde_json::from_slice(&out.stdout).expect("JSON on stdout")
     }
 
@@ -157,7 +157,7 @@ impl Sim {
             "{:#x}",
             0x0c7f_ffffu32 & !u32::from_str_radix(&dir[2..], 16).unwrap()
         );
-        self.pochi(&[
+        self.tcapi(&[
             "map",
             "set",
             "flags=0",
@@ -193,7 +193,7 @@ macro_rules! sim {
 #[test]
 fn the_binary_talks_to_the_simulator() {
     let sim = sim!();
-    sim.pochi(&["version"])
+    sim.tcapi(&["version"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Protocol: v2"));
@@ -224,9 +224,9 @@ fn safety_status_starts_all_off() {
 fn outputs_reset_returns_the_outputs_to_def() {
     let sim = sim!();
     sim.map_outputs("0xf");
-    sim.pochi(&["write", "0x5", "0xf"]).assert().success();
+    sim.tcapi(&["write", "0x5", "0xf"]).assert().success();
     assert_eq!(sim.json(&["state"])["outputs"], 5);
-    sim.pochi(&["outputs", "reset"]).assert().success();
+    sim.tcapi(&["outputs", "reset"]).assert().success();
     assert_eq!(sim.json(&["state"])["outputs"], 0);
 }
 
@@ -234,8 +234,8 @@ fn outputs_reset_returns_the_outputs_to_def() {
 fn a_watchdog_left_unfed_trips_and_the_latch_has_its_exit_code() {
     let sim = sim!();
     sim.map_outputs("0xf");
-    sim.pochi(&["write", "0x1", "0x1"]).assert().success();
-    sim.pochi(&["wdog", "200"])
+    sim.tcapi(&["write", "0x1", "0x1"]).assert().success();
+    sim.tcapi(&["wdog", "200"])
         .assert()
         .success()
         .stdout(predicate::str::contains("safety hold"));
@@ -248,12 +248,12 @@ fn a_watchdog_left_unfed_trips_and_the_latch_has_its_exit_code() {
     assert_eq!(sim.json(&["state"])["outputs"], 0);
 
     // The latch refuses a write that leaves def: exit code 4, kind in JSON.
-    sim.pochi(&["write", "0x1", "0x1"])
+    sim.tcapi(&["write", "0x1", "0x1"])
         .assert()
         .code(4)
         .stderr(predicate::str::contains("FAILSAFE"));
     let out = sim
-        .pochi(&["--json", "write", "0x1", "0x1"])
+        .tcapi(&["--json", "write", "0x1", "0x1"])
         .assert()
         .code(4)
         .get_output()
@@ -262,27 +262,27 @@ fn a_watchdog_left_unfed_trips_and_the_latch_has_its_exit_code() {
     assert_eq!(json["kind"], "failsafe");
 
     // outputs reset works under the latch and keeps it.
-    sim.pochi(&["outputs", "reset"]).assert().success();
+    sim.tcapi(&["outputs", "reset"]).assert().success();
     assert_eq!(sim.json(&["safety", "status"])["failsafe"], true);
 
-    sim.pochi(&["failsafe", "clear"]).assert().success();
-    sim.pochi(&["wdog", "off"]).assert().success();
-    sim.pochi(&["write", "0x1", "0x1"]).assert().success();
+    sim.tcapi(&["failsafe", "clear"]).assert().success();
+    sim.tcapi(&["wdog", "off"]).assert().success();
+    sim.tcapi(&["write", "0x1", "0x1"]).assert().success();
 }
 
 #[test]
 fn an_exclusive_violation_exits_5_with_group_and_mask() {
     let sim = sim!();
     sim.map_outputs("0xf");
-    sim.pochi(&["excl", "set", "0x3", "0xc"]).assert().success();
-    sim.pochi(&["write", "0x4", "0x4"]).assert().success();
+    sim.tcapi(&["excl", "set", "0x3", "0xc"]).assert().success();
+    sim.tcapi(&["write", "0x4", "0x4"]).assert().success();
 
-    sim.pochi(&["write", "0x8", "0x8"])
+    sim.tcapi(&["write", "0x8", "0x8"])
         .assert()
         .code(5)
         .stderr(predicate::str::contains("EXCLUSIVE"));
     let out = sim
-        .pochi(&["--json", "write", "0x8", "0x8"])
+        .tcapi(&["--json", "write", "0x8", "0x8"])
         .assert()
         .code(5)
         .get_output()
@@ -296,7 +296,7 @@ fn an_exclusive_violation_exits_5_with_group_and_mask() {
         sim.json(&["excl", "get"])["groups"],
         serde_json::json!([3, 12])
     );
-    sim.pochi(&["excl", "get"])
+    sim.tcapi(&["excl", "get"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -304,24 +304,24 @@ fn an_exclusive_violation_exits_5_with_group_and_mask() {
         ));
 
     // outputs reset ignores the groups; excl clear lifts the restriction.
-    sim.pochi(&["outputs", "reset"]).assert().success();
-    sim.pochi(&["excl", "clear"]).assert().success();
-    sim.pochi(&["write", "0xc", "0xc"]).assert().success();
+    sim.tcapi(&["outputs", "reset"]).assert().success();
+    sim.tcapi(&["excl", "clear"]).assert().success();
+    sim.tcapi(&["write", "0xc", "0xc"]).assert().success();
 }
 
 #[test]
 fn excl_set_of_a_non_output_pin_is_a_device_error() {
     let sim = sim!();
     sim.map_outputs("0x3");
-    sim.pochi(&["excl", "set", "0xc"]).assert().code(1);
+    sim.tcapi(&["excl", "set", "0xc"]).assert().code(1);
 }
 
 #[test]
 fn usbsafe_is_set_and_shown() {
     let sim = sim!();
-    sim.pochi(&["usbsafe", "on"]).assert().success();
+    sim.tcapi(&["usbsafe", "on"]).assert().success();
     assert_eq!(sim.json(&["safety", "status"])["usbsafe"], true);
-    sim.pochi(&["usbsafe", "off"]).assert().success();
+    sim.tcapi(&["usbsafe", "off"]).assert().success();
     assert_eq!(sim.json(&["safety", "status"])["usbsafe"], false);
 }
 
@@ -345,7 +345,7 @@ fn safety_apply_sets_everything_in_the_file_and_verifies_it() {
 #[test]
 fn safety_apply_of_a_bad_file_is_an_argument_error_with_file_and_line() {
     let sim = sim!();
-    sim.pochi(&[
+    sim.tcapi(&[
         "safety",
         "apply",
         &fixture("safety-watchdog-too-small.toml"),
@@ -360,7 +360,7 @@ fn safety_apply_with_groups_on_input_pins_stops_with_a_device_error() {
     let sim = sim!();
     // GP2-GP4 are inputs after the default map: the device refuses the groups
     // and nothing after `excl set` is sent.
-    sim.pochi(&["safety", "apply", &fixture("safety-full.toml")])
+    sim.tcapi(&["safety", "apply", &fixture("safety-full.toml")])
         .assert()
         .code(1);
     assert_eq!(sim.json(&["safety", "status"])["wdog_ms"], 0);
@@ -369,7 +369,7 @@ fn safety_apply_with_groups_on_input_pins_stops_with_a_device_error() {
 #[test]
 fn safety_hold_needs_an_enabled_watchdog() {
     let sim = sim!();
-    sim.pochi(&["safety", "hold"])
+    sim.tcapi(&["safety", "hold"])
         .assert()
         .code(3)
         .stderr(predicate::str::contains("watchdog is disabled"));
@@ -379,16 +379,16 @@ fn safety_hold_needs_an_enabled_watchdog() {
 fn safety_hold_keeps_the_watchdog_fed_and_sigint_leaves_the_outputs_alone() {
     let sim = sim!();
     sim.map_outputs("0xf");
-    sim.pochi(&["write", "0x1", "0x1"]).assert().success();
-    sim.pochi(&["wdog", "1000"]).assert().success();
+    sim.tcapi(&["write", "0x1", "0x1"]).assert().success();
+    sim.tcapi(&["wdog", "1000"]).assert().success();
 
-    let mut hold = Process::new(POCHI)
+    let mut hold = Process::new(TCAPI)
         .env("LD_PRELOAD", dtr_shim())
         .args(["--port", &sim.port, "safety", "hold"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("start pochi safety hold");
+        .expect("start tcapi safety hold");
     let mut stdout = BufReader::new(hold.stdout.take().expect("hold stdout"));
     let mut first = String::new();
     stdout.read_line(&mut first).expect("first line");

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 
-use pochi_sdk::DeviceInfo;
+use tcapi_sdk::DeviceInfo;
 
 use crate::device::{self, DeviceSelector};
 use crate::output;

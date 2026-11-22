@@ -1,10 +1,10 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use pochi::{commands, device, exit, output, parse};
-use pochi_sdk::TS_GET_MAX;
 use std::process;
+use tcapi::{commands, device, exit, output, parse};
+use tcapi_sdk::TS_GET_MAX;
 
 #[derive(Parser)]
-#[command(name = "pochi", version, about = "CLI tool for Pochi-DIO")]
+#[command(name = "tcapi", version, about = "CLI tool for Tcapi-DIO")]
 struct Cli {
     /// Output in JSON format
     #[arg(long, global = true)]
@@ -28,7 +28,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List connected Pochi-DIO devices
+    /// List connected Tcapi-DIO devices
     List,
 
     /// Get firmware version
@@ -156,9 +156,9 @@ const WDOG_HELP: &str = "Set the watchdog timeout (100-10000 ms; 0 or 'off' disa
 
 Once enabled, the device trips when no command is answered for the timeout: \
 every output goes to its default (def), the failsafe latch is set and stays \
-set until 'pochi failsafe clear'. Each pochi invocation connects, runs and \
+set until 'tcapi failsafe clear'. Each tcapi invocation connects, runs and \
 exits, so a watchdog enabled here trips the device once this process has \
-ended and the timeout has elapsed. Run 'pochi safety hold' to keep it fed \
+ended and the timeout has elapsed. Run 'tcapi safety hold' to keep it fed \
 until Ctrl+C. The setting is volatile: it is off again after every restart.";
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -196,7 +196,7 @@ has no groups), 'usbsafe on|off', 'wdog <ms>'. The first error stops the apply; 
 settings accepted before it stay in effect. The pins of the groups must \
 already be outputs (apply the map first). If the file enables the watchdog, \
 the device trips when this process has ended and the timeout has elapsed; \
-run 'pochi safety hold' to keep it fed.";
+run 'tcapi safety hold' to keep it fed.";
 
 const HOLD_HELP: &str = "Keep the enabled watchdog fed until Ctrl+C.
 

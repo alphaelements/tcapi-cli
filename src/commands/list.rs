@@ -1,5 +1,5 @@
 use anyhow::Result;
-use pochi_sdk::discovery;
+use tcapi_sdk::discovery;
 
 use crate::device;
 use crate::output;
@@ -13,7 +13,7 @@ pub fn run(json: bool) -> Result<()> {
     }
 
     if devices.is_empty() {
-        println!("No Pochi-DIO devices found.");
+        println!("No Tcapi-DIO devices found.");
         return Ok(());
     }
 
@@ -44,7 +44,7 @@ pub fn run(json: bool) -> Result<()> {
 
     if !duplicates.is_empty() {
         eprintln!("\nWarning: duplicate device numbers detected: {duplicates:?}");
-        eprintln!("Use 'pochi devnum auto' to assign unique numbers, or specify --uid/--port.");
+        eprintln!("Use 'tcapi devnum auto' to assign unique numbers, or specify --uid/--port.");
     }
 
     Ok(())

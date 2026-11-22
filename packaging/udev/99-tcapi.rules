@@ -1,11 +1,11 @@
-# udev rules for Pochi devices (Pochi-DIO: VID 0x2E8A, PID 0x1175).
+# udev rules for Tcapi devices (Tcapi-DIO: VID 0x2E8A, PID 0x1175).
 #
 # Install:
-#   sudo install -m 0644 packaging/udev/99-pochi.rules /etc/udev/rules.d/99-pochi.rules
+#   sudo install -m 0644 packaging/udev/99-tcapi.rules /etc/udev/rules.d/99-tcapi.rules
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
 #   (unplug and re-plug the device if it was connected while you did this)
 #
-# Check the syntax:   udevadm verify packaging/udev/99-pochi.rules
+# Check the syntax:   udevadm verify packaging/udev/99-tcapi.rules
 #
 # What the rules do:
 #   1. Give the logged-in desktop user access to the serial port (uaccess), and

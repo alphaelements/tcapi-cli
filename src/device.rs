@@ -1,9 +1,9 @@
 //! Device enumeration and selection (`--port`, `--uid`, `--device`). The
-//! scanning, probing and connecting is done by `pochi-sdk`; this module adds
+//! scanning, probing and connecting is done by `tcapi-sdk`; this module adds
 //! the CLI's selection rules and error messages.
 
 use anyhow::{Context, Result};
-use pochi_sdk::{discovery, Connection, DeviceInfo, SdkError};
+use tcapi_sdk::{discovery, Connection, DeviceInfo, SdkError};
 
 #[derive(Debug, Clone)]
 pub struct DeviceSelector {
@@ -12,7 +12,7 @@ pub struct DeviceSelector {
     pub port: Option<String>,
 }
 
-/// Enumerate and probe all Pochi-DIO devices. Ports that fail to probe (for
+/// Enumerate and probe all Tcapi-DIO devices. Ports that fail to probe (for
 /// example held open by another process) are reported as warnings; they do
 /// not abort the scan.
 pub fn enumerate_devices() -> Result<Vec<DeviceInfo>> {
@@ -35,11 +35,11 @@ pub fn select_device(devices: &[DeviceInfo], selector: &DeviceSelector) -> Resul
             .find(|d| d.port == *port)
             .cloned()
             .ok_or(SdkError::NoDevice)
-            .with_context(|| format!("no Pochi-DIO device on port {port}"));
+            .with_context(|| format!("no Tcapi-DIO device on port {port}"));
     }
     if let Some(uid) = &selector.uid {
         return discovery::find_by_uid(devices, uid)
-            .with_context(|| format!("no Pochi-DIO device with UID {uid}"));
+            .with_context(|| format!("no Tcapi-DIO device with UID {uid}"));
     }
     if let Some(num) = selector.device {
         return discovery::find_by_device_number(devices, num).with_context(|| {

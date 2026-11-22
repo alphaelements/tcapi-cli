@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Checks packaging/udev/99-pochi.rules: it must pass `udevadm verify` (when udevadm
+# Checks packaging/udev/99-tcapi.rules: it must pass `udevadm verify` (when udevadm
 # supports it) and keep the four settings the Linux setup guide in README.md relies on.
 #
 # Usage: ./tests/test_udev_rules.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RULES="$ROOT/packaging/udev/99-pochi.rules"
+RULES="$ROOT/packaging/udev/99-tcapi.rules"
 fail=0
 
 check() {
@@ -21,8 +21,8 @@ check() {
 
 [[ -f "$RULES" ]] || { echo "NOT ok - $RULES does not exist"; exit 1; }
 
-check "matches the Pochi VID" 'ATTRS{idVendor}=="2e8a"'
-check "matches the Pochi PID" 'ATTRS{idProduct}=="000a"'
+check "matches the Tcapi VID" 'ATTRS{idVendor}=="2e8a"'
+check "matches the Tcapi PID" 'ATTRS{idProduct}=="000a"'
 check "uaccess for logged-in users" 'TAG+="uaccess"'
 check "dialout group for headless use" 'GROUP="dialout"'
 check "ModemManager is told to ignore the device" 'ENV{ID_MM_DEVICE_IGNORE}="1"'

@@ -3,8 +3,8 @@
 //! refused the command (`ERR FAILSAFE`), 5 = an exclusive output group would
 //! be violated (`ERR EXCLUSIVE`).
 
-use pochi_sdk::SdkError;
 use serde_json::{json, Value};
+use tcapi_sdk::SdkError;
 
 pub const EXIT_DEVICE_ERROR: i32 = 1;
 pub const EXIT_CONNECTION: i32 = 2;
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn context_does_not_hide_the_sdk_error() {
         let err = Err::<(), _>(SdkError::NoDevice)
-            .context("no Pochi-DIO device with UID X")
+            .context("no Tcapi-DIO device with UID X")
             .unwrap_err();
         assert_eq!(exit_code(&err), EXIT_CONNECTION);
     }

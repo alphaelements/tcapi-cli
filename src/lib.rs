@@ -1,7 +1,7 @@
-//! `pochi` — command-line tool for Pochi-DIO (RP2350 high-speed digital I/O).
+//! `tcapi` — command-line tool for Tcapi-DIO (RP2350 high-speed digital I/O).
 //!
 //! The binary in `main.rs` only parses arguments; every command lives in
-//! [`commands`] and talks to the device through `pochi-sdk`.
+//! [`commands`] and talks to the device through `tcapi-sdk`.
 
 pub mod commands;
 pub mod device;

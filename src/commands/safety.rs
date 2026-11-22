@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use pochi_sdk::{config, gp_to_ch, Connection, SafetyConfig, SafetyState, SdkError};
+use tcapi_sdk::{config, gp_to_ch, Connection, SafetyConfig, SafetyState, SdkError};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
@@ -134,7 +134,7 @@ pub fn apply(
 fn watchdog_warning(ms: u32) -> String {
     format!(
         "The device trips ({ms} ms without an answered command) when this process ends; \
-         run `pochi safety hold` to keep the watchdog fed."
+         run `tcapi safety hold` to keep the watchdog fed."
     )
 }
 
@@ -156,7 +156,7 @@ fn ensure_not_latched(state: &SafetyState) -> Result<()> {
     if state.failsafe {
         return Err(anyhow::Error::new(SdkError::Failsafe).context(format!(
             "failsafe latched (cause={}); the outputs are at their defaults, \
-             release the latch with `pochi failsafe clear`",
+             release the latch with `tcapi failsafe clear`",
             state.cause.as_str()
         )));
     }
@@ -182,7 +182,7 @@ pub fn hold(
     if state.wdog_ms == 0 {
         bail!(
             "the watchdog is disabled (wdog_ms=0), nothing to hold; \
-             enable it with `pochi wdog <ms>` or `pochi safety apply <file>`"
+             enable it with `tcapi wdog <ms>` or `tcapi safety apply <file>`"
         );
     }
     ensure_not_latched(&state)?;

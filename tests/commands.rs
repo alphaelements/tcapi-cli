@@ -11,10 +11,10 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::Result;
-use pochi::commands::{info, io, map, pattern, raw, timestamp};
-use pochi::exit::{exit_code, EXIT_CONNECTION, EXIT_DEVICE_ERROR};
-use pochi_sdk::{Connection, PinMap, PushEvent};
 use support::{golden_events, FakeDevice, Golden, Script};
+use tcapi::commands::{info, io, map, pattern, raw, timestamp};
+use tcapi::exit::{exit_code, EXIT_CONNECTION, EXIT_DEVICE_ERROR};
+use tcapi_sdk::{Connection, PinMap, PushEvent};
 
 fn fixture(name: &str) -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -121,7 +121,7 @@ fn map_set_sends_the_canonical_map_set_line() {
     ]
     .map(String::from)
     .to_vec();
-    let map_value = pochi::parse::parse_map_args(&args).unwrap();
+    let map_value = tcapi::parse::parse_map_args(&args).unwrap();
     let (out, device) = output_of(Script::new().reply(expected, vec!["OK".into()]), |c, o| {
         map::apply(c, &map_value, "Map set.", false, o)
     });
@@ -335,7 +335,7 @@ fn ts_get_reconcile_groups_the_events() {
 fn ts_get_rejects_more_than_the_per_call_maximum_locally() {
     let (mut conn, device) = FakeDevice::connected(Script::new());
     let err = timestamp::get(&mut conn, 256, false, false, &mut Vec::new()).unwrap_err();
-    assert_eq!(exit_code(&err), pochi::exit::EXIT_ARGUMENT);
+    assert_eq!(exit_code(&err), tcapi::exit::EXIT_ARGUMENT);
     assert!(!device.commands().iter().any(|c| c.starts_with("ts get")));
 }
 
@@ -386,7 +386,7 @@ fn ts_drain_reads_full_batches_until_the_ring_is_empty() {
 
 #[test]
 fn pattern_add_sends_tick_steps() {
-    let steps = ["0x1:5", "0x0:5"].map(|s| pochi::parse::parse_step(s).unwrap());
+    let steps = ["0x1:5", "0x0:5"].map(|s| tcapi::parse::parse_step(s).unwrap());
     let (out, device) = output_of(
         Script::new().reply("pattern add 0x1:5 0x0:5", vec!["OK total=2".into()]),
         |c, o| pattern::add(c, &steps, false, o),
@@ -480,7 +480,7 @@ fn state_and_write_use_typed_values() {
 fn write_outside_the_dio_pins_is_rejected_locally() {
     let (mut conn, device) = FakeDevice::connected(Script::new());
     let err = io::write(&mut conn, 0x80_0000, 0x80_0000, false, &mut Vec::new()).unwrap_err();
-    assert_eq!(exit_code(&err), pochi::exit::EXIT_ARGUMENT);
+    assert_eq!(exit_code(&err), tcapi::exit::EXIT_ARGUMENT);
     assert!(!device.commands().iter().any(|c| c.starts_with("write")));
 }
 

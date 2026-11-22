@@ -7,11 +7,11 @@ use std::time::Duration;
 
 use crate::support::{FakeDevice, Golden, Script};
 use anyhow::Result;
-use pochi::commands::safety;
-use pochi::exit::{
+use tcapi::commands::safety;
+use tcapi::exit::{
     error_json, exit_code, EXIT_ARGUMENT, EXIT_CONNECTION, EXIT_EXCLUSIVE, EXIT_FAILSAFE,
 };
-use pochi_sdk::{config, Connection};
+use tcapi_sdk::{config, Connection};
 
 const SAFETY_IDLE: &str = "OK wdog_ms=0 remaining_ms=0 failsafe=0 cause=none usbsafe=0 excl=0";
 const SAFETY_LATCHED: &str = "OK wdog_ms=500 remaining_ms=0 failsafe=1 cause=wdog usbsafe=0 excl=0";
@@ -244,7 +244,7 @@ fn an_exclusive_violation_has_its_own_exit_code_and_json() {
     let reply = golden().reply(&["excl set 0xc", "write 0x4 0x4"], "write 0x8 0x8");
     assert_eq!(reply, ["ERR EXCLUSIVE group=0 mask=0x0000000c"]);
     let script = Script::new().reply("write 0x8 0x8", reply);
-    let err = error_of(script, |c, o| pochi::commands::io::write(c, 8, 8, false, o));
+    let err = error_of(script, |c, o| tcapi::commands::io::write(c, 8, 8, false, o));
     assert_eq!(exit_code(&err), EXIT_EXCLUSIVE);
     let json = error_json(&err);
     assert_eq!(json["kind"], "exclusive");
@@ -260,7 +260,7 @@ fn a_failsafe_refusal_has_its_own_exit_code() {
     assert_eq!(reply, ["ERR FAILSAFE"]);
     let script = Script::new().reply("write 0xf 0xf", reply);
     let err = error_of(script, |c, o| {
-        pochi::commands::io::write(c, 0xf, 0xf, false, o)
+        tcapi::commands::io::write(c, 0xf, 0xf, false, o)
     });
     assert_eq!(exit_code(&err), EXIT_FAILSAFE);
     assert_eq!(error_json(&err)["kind"], "failsafe");

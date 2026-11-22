@@ -1,4 +1,4 @@
-//! Test support: a fake Pochi-DIO on a PTY whose replies are taken from the
+//! Test support: a fake Tcapi-DIO on a PTY whose replies are taken from the
 //! golden transcripts in `protocol/golden/`, so no wire text is hand-written.
 
 use std::collections::HashMap;
@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use pochi_sdk::Connection;
 use serialport::{SerialPort, TTYPort};
+use tcapi_sdk::Connection;
 
 /// One golden test case: its exchanges in order.
 struct Case {
@@ -179,7 +179,7 @@ pub struct FakeDevice {
 impl FakeDevice {
     /// Start the device and connect to it; the connection is checked for
     /// `proto=2` exactly as `Connection::open` does.
-    pub fn connect(script: Script) -> (pochi_sdk::Result<Connection>, Self) {
+    pub fn connect(script: Script) -> (tcapi_sdk::Result<Connection>, Self) {
         let (device, slave) = Self::start(script);
         (Connection::from_port(Box::new(slave)), device)
     }

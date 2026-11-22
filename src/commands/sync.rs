@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
-use pochi_sdk::reconcile::{self, PairStats, ReconcileGroup};
-use pochi_sdk::{Connection, DeviceInfo, EdgeMode, TimestampEvent};
 use serde::Serialize;
+use tcapi_sdk::reconcile::{self, PairStats, ReconcileGroup};
+use tcapi_sdk::{Connection, DeviceInfo, EdgeMode, TimestampEvent};
 
 use crate::commands::timestamp;
 use crate::device::{self, DeviceSelector};
@@ -160,7 +160,7 @@ impl Group {
     /// (or its own error) is what the caller needs, and every remaining
     /// device must still be released.
     fn stop_sync(&mut self) {
-        let warn = |what: &str, uid: &str, result: pochi_sdk::Result<()>| {
+        let warn = |what: &str, uid: &str, result: tcapi_sdk::Result<()>| {
             if let Err(e) = result {
                 eprintln!("warning: {what} failed on {uid}: {e}");
             }
@@ -276,7 +276,7 @@ pub fn reconcile_devices(
     (groups, stats)
 }
 
-/// `pochi sync capture` — multi-device synchronized timestamp capture with
+/// `tcapi sync capture` — multi-device synchronized timestamp capture with
 /// host-side reconciliation:
 /// 1. enumerate (2+ devices), pick master (selector or first device)
 /// 2. slaves: sync arm; master: sync master → sync start

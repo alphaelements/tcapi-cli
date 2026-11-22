@@ -1,17 +1,17 @@
 [package]
-name = "pochi"
+name = "tcapi"
 version = "0.1.0"
 edition = "2021"
-description = "CLI tool for Pochi-DIO (RP2350 high-speed digital I/O unit)"
+description = "CLI tool for Tcapi-DIO (RP2350 high-speed digital I/O unit)"
 license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
-# Local development against the sibling pochi-tools checkout; the SDK owns
+# Local development against the sibling tcapi-tools checkout; the SDK owns
 # the transport, the TOML schema and timestamp reconciliation.
-pochi-sdk = { path = "../pochi-tools/sdk/rust" }
+tcapi-sdk = { path = "../tcapi-tools/sdk/rust" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

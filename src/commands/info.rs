@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use anyhow::{bail, Context, Result};
-use pochi_sdk::{Capabilities, Connection, DeviceInfo, VersionInfo};
+use tcapi_sdk::{Capabilities, Connection, DeviceInfo, VersionInfo};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
@@ -157,7 +157,7 @@ pub fn plan_auto_assignment(devices: &[DeviceInfo]) -> Result<Vec<(usize, u8)>> 
 fn run_devnum_auto(json: bool) -> Result<()> {
     let devices = device::enumerate_devices()?;
     if devices.is_empty() {
-        bail!("no Pochi-DIO devices found");
+        bail!("no Tcapi-DIO devices found");
     }
 
     let plan = plan_auto_assignment(&devices)?;
@@ -199,7 +199,7 @@ fn run_devnum_auto(json: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pochi_sdk::{FEAT_RESET, FEAT_SYNC};
+    use tcapi_sdk::{FEAT_RESET, FEAT_SYNC};
 
     fn caps(features: u32) -> Capabilities {
         Capabilities {

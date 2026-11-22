@@ -1,11 +1,11 @@
 //! Parsers for command-line arguments (masks, edge modes, pattern steps,
-//! `map set` key/value pairs). Everything wire-related lives in `pochi-sdk`;
+//! `map set` key/value pairs). Everything wire-related lives in `tcapi-sdk`;
 //! this module only turns user text into the SDK's typed values.
 
 use std::collections::HashMap;
 
 use anyhow::{bail, Context, Result};
-use pochi_sdk::{EdgeMode, PatternStep, PinMap, WDOG_MAX_MS, WDOG_MIN_MS};
+use tcapi_sdk::{EdgeMode, PatternStep, PinMap, WDOG_MAX_MS, WDOG_MIN_MS};
 
 /// Parse an unsigned 32-bit number written as `0x` hex or decimal.
 pub fn parse_u32(text: &str) -> Result<u32> {

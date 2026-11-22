@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::io::{self, BufRead, Write};
 
-use pochi_sdk::Connection;
+use tcapi_sdk::Connection;
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
@@ -29,7 +29,7 @@ pub fn raw(conn: &mut Connection, text: &str, json: bool, out: &mut impl Write) 
 
 pub fn run_interactive(selector: &DeviceSelector) -> Result<()> {
     let (_info, mut conn) = device::open_device(selector)?;
-    println!("Pochi-DIO interactive mode (type 'exit' or Ctrl+D to quit)");
+    println!("Tcapi-DIO interactive mode (type 'exit' or Ctrl+D to quit)");
     repl(
         io::stdin().lock(),
         &mut io::stdout().lock(),
@@ -48,7 +48,7 @@ pub fn repl(
     mut exec: impl FnMut(&str) -> Result<Vec<String>>,
 ) -> Result<()> {
     loop {
-        write!(out, "pochi> ").context("failed to write prompt")?;
+        write!(out, "tcapi> ").context("failed to write prompt")?;
         out.flush().context("failed to flush stdout")?;
 
         let mut line = String::new();
@@ -101,7 +101,7 @@ mod tests {
                 "  write".to_string(),
             ])
         });
-        assert_eq!(out, "pochi> OK count=2\n  read\n  write\npochi> ");
+        assert_eq!(out, "tcapi> OK count=2\n  read\n  write\ntcapi> ");
         assert!(err.is_empty());
     }
 
@@ -128,7 +128,7 @@ mod tests {
             Ok(vec![])
         });
         assert_eq!(calls, 0);
-        assert!(out.ends_with("pochi> \n"));
+        assert!(out.ends_with("tcapi> \n"));
     }
 
     #[test]

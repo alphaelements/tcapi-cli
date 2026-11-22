@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use pochi_sdk::{Connection, PushEvent, SdkError};
+use tcapi_sdk::{Connection, PushEvent, SdkError};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
@@ -178,8 +178,8 @@ pub fn watch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pochi_sdk::FailsafeCause;
     use std::sync::mpsc;
+    use tcapi_sdk::FailsafeCause;
 
     /// Heartbeat interval that never fires within a test.
     const IDLE: Duration = Duration::from_secs(3600);

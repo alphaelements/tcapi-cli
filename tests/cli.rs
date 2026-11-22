@@ -1,4 +1,4 @@
-//! Tests of the `pochi` binary that do not need a device: argument errors,
+//! Tests of the `tcapi` binary that do not need a device: argument errors,
 //! TOML file errors and exit codes. Everything here fails (or succeeds)
 //! before a connection is opened.
 
@@ -9,10 +9,10 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 /// A serial port path that does not exist.
-const NO_PORT: &str = "/dev/pochi-test-no-such-port";
+const NO_PORT: &str = "/dev/tcapi-test-no-such-port";
 
-fn pochi(args: &[&str]) -> Command {
-    let mut cmd = Command::cargo_bin("pochi").expect("pochi binary");
+fn tcapi(args: &[&str]) -> Command {
+    let mut cmd = Command::cargo_bin("tcapi").expect("tcapi binary");
     cmd.args(["--port", NO_PORT])
         .args(args)
         .timeout(Duration::from_secs(20));
@@ -29,7 +29,7 @@ fn fixture(name: &str) -> String {
 
 #[test]
 fn unreachable_port_is_a_connection_error() {
-    pochi(&["read"])
+    tcapi(&["read"])
         .assert()
         .code(2)
         .stderr(predicate::str::contains("failed to open"));
@@ -37,7 +37,7 @@ fn unreachable_port_is_a_connection_error() {
 
 #[test]
 fn json_mode_reports_errors_on_stdout() {
-    pochi(&["--json", "read"])
+    tcapi(&["--json", "read"])
         .assert()
         .code(2)
         .stdout(predicate::str::contains("\"error\""));
@@ -45,7 +45,7 @@ fn json_mode_reports_errors_on_stdout() {
 
 #[test]
 fn usage_errors_exit_with_the_argument_code() {
-    Command::cargo_bin("pochi")
+    Command::cargo_bin("tcapi")
         .unwrap()
         .arg("no-such-command")
         .assert()
@@ -54,13 +54,13 @@ fn usage_errors_exit_with_the_argument_code() {
 
 #[test]
 fn help_and_version_succeed() {
-    Command::cargo_bin("pochi")
+    Command::cargo_bin("tcapi")
         .unwrap()
         .arg("--help")
         .assert()
         .success()
         .stdout(predicate::str::contains("Pin map operations"));
-    Command::cargo_bin("pochi")
+    Command::cargo_bin("tcapi")
         .unwrap()
         .arg("--version")
         .assert()
@@ -69,7 +69,7 @@ fn help_and_version_succeed() {
 
 #[test]
 fn map_set_needs_all_eight_keys_before_any_connection() {
-    pochi(&["map", "set", "dir=0x1"])
+    tcapi(&["map", "set", "dir=0x1"])
         .assert()
         .code(3)
         .stderr(predicate::str::contains("missing map key"));
@@ -78,7 +78,7 @@ fn map_set_needs_all_eight_keys_before_any_connection() {
 #[test]
 fn map_set_rejects_an_invalid_map_before_any_connection() {
     // pull-up and pull-down on the same pin (R-M1)
-    pochi(&[
+    tcapi(&[
         "map", "set", "flags=0", "dir=0", "pu=0x1", "pd=0x1", "def=0", "opol=0", "ipol=0", "edge=0",
     ])
     .assert()
@@ -89,7 +89,7 @@ fn map_set_rejects_an_invalid_map_before_any_connection() {
 #[test]
 fn map_load_reports_file_and_line_of_a_bad_file() {
     let file = fixture("map-unknown-key.toml");
-    pochi(&["map", "load", &file])
+    tcapi(&["map", "load", &file])
         .assert()
         .code(3)
         .stderr(predicate::str::contains(format!("{file}:7:")));
@@ -97,7 +97,7 @@ fn map_load_reports_file_and_line_of_a_bad_file() {
 
 #[test]
 fn map_load_rejects_a_missing_file() {
-    pochi(&["map", "load", "/nonexistent/map.toml"])
+    tcapi(&["map", "load", "/nonexistent/map.toml"])
         .assert()
         .code(3)
         .stderr(predicate::str::contains("failed to read map file"));
@@ -105,11 +105,11 @@ fn map_load_rejects_a_missing_file() {
 
 #[test]
 fn map_load_rejects_a_v1_toml_file() {
-    let dir = std::env::temp_dir().join(format!("pochi-cli-v1-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("tcapi-cli-v1-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("v1.toml");
     std::fs::write(&file, "version = 1\n[input]\nbase = 0\ncount = 23\n").unwrap();
-    pochi(&["map", "load", file.to_str().unwrap()])
+    tcapi(&["map", "load", file.to_str().unwrap()])
         .assert()
         .code(3)
         .stderr(predicate::str::contains("v1.toml:1:"));
@@ -120,7 +120,7 @@ fn map_load_rejects_a_v1_toml_file() {
 fn pattern_upload_reports_file_and_line_of_a_bad_file() {
     let file = fixture("pattern-unknown-top-key.toml");
     for subcommand in ["upload", "load"] {
-        pochi(&["pattern", subcommand, &file])
+        tcapi(&["pattern", subcommand, &file])
             .assert()
             .code(3)
             .stderr(predicate::str::contains(format!("{file}:")));
@@ -129,7 +129,7 @@ fn pattern_upload_reports_file_and_line_of_a_bad_file() {
 
 #[test]
 fn pattern_add_rejects_a_malformed_step() {
-    pochi(&["pattern", "add", "0x1"])
+    tcapi(&["pattern", "add", "0x1"])
         .assert()
         .code(3)
         .stderr(predicate::str::contains("<out_bits>:<hold_ticks>"));
@@ -137,12 +137,12 @@ fn pattern_add_rejects_a_malformed_step() {
 
 #[test]
 fn v1_hex_pattern_load_is_gone() {
-    pochi(&["pattern", "load-hex", "0100"]).assert().code(3);
+    tcapi(&["pattern", "load-hex", "0100"]).assert().code(3);
 }
 
 #[test]
 fn ts_arm_rejects_an_unknown_edge_mode() {
-    pochi(&["ts", "arm", "0x1", "sideways"])
+    tcapi(&["ts", "arm", "0x1", "sideways"])
         .assert()
         .code(3)
         .stderr(predicate::str::contains("rising, falling or both"));
@@ -150,11 +150,11 @@ fn ts_arm_rejects_an_unknown_edge_mode() {
 
 #[test]
 fn devnum_rejects_255() {
-    pochi(&["devnum", "255"]).assert().code(3);
+    tcapi(&["devnum", "255"]).assert().code(3);
 }
 
 fn help_of(args: &[&str]) -> String {
-    let out = Command::cargo_bin("pochi")
+    let out = Command::cargo_bin("tcapi")
         .unwrap()
         .args(args)
         .assert()
@@ -182,7 +182,7 @@ fn outputs_has_reset_and_no_alloff() {
     let help = help_of(&["outputs", "--help"]);
     assert!(help.contains("reset"), "{help}");
     assert!(!help.to_lowercase().contains("alloff"), "{help}");
-    Command::cargo_bin("pochi")
+    Command::cargo_bin("tcapi")
         .unwrap()
         .args(["outputs", "alloff"])
         .assert()
@@ -215,18 +215,18 @@ fn safety_subcommands_document_the_watchdog_caveat() {
 
 #[test]
 fn wdog_out_of_range_is_an_argument_error_before_any_connection() {
-    pochi(&["wdog", "99"]).assert().code(3);
-    pochi(&["wdog", "abc"]).assert().code(3);
+    tcapi(&["wdog", "99"]).assert().code(3);
+    tcapi(&["wdog", "abc"]).assert().code(3);
 }
 
 #[test]
 fn excl_set_needs_at_least_one_mask() {
-    pochi(&["excl", "set"]).assert().code(3);
+    tcapi(&["excl", "set"]).assert().code(3);
 }
 
 #[test]
 fn safety_apply_rejects_a_bad_file_before_any_connection() {
-    pochi(&["safety", "apply", &fixture("safety-pin-duplicate.toml")])
+    tcapi(&["safety", "apply", &fixture("safety-pin-duplicate.toml")])
         .assert()
         .code(3)
         .stderr(predicate::str::contains("safety-pin-duplicate.toml"));

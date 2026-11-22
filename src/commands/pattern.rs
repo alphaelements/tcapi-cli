@@ -2,7 +2,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use pochi_sdk::{config, Connection, PatternMode, PatternState, PatternStep, PATTERN_TICK_NS};
+use tcapi_sdk::{config, Connection, PatternMode, PatternState, PatternStep, PATTERN_TICK_NS};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn load_pattern_file_reports_missing_file() {
-        let err = load_pattern_file("/nonexistent/pochi-pattern.toml").unwrap_err();
+        let err = load_pattern_file("/nonexistent/tcapi-pattern.toml").unwrap_err();
         assert!(err.to_string().contains("failed to read pattern file"));
     }
 }

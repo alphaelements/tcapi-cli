@@ -2,9 +2,9 @@ use std::io::{self, Write};
 use std::time::Duration;
 
 use anyhow::Result;
-use pochi_sdk::reconcile::{self, ReconcileGroup, SourceEvent};
-use pochi_sdk::{Connection, TimestampEvent, TimestampResult, TS_GET_MAX};
 use serde::Serialize;
+use tcapi_sdk::reconcile::{self, ReconcileGroup, SourceEvent};
+use tcapi_sdk::{Connection, TimestampEvent, TimestampResult, TS_GET_MAX};
 
 use crate::device::{self, DeviceSelector};
 use crate::output;
@@ -183,8 +183,8 @@ fn print_result(
 /// device ring is empty; `overflow` is set if any call reported it.
 pub fn drain_events(
     max_events: u16,
-    mut get: impl FnMut(u16) -> pochi_sdk::Result<TimestampResult>,
-) -> pochi_sdk::Result<TimestampResult> {
+    mut get: impl FnMut(u16) -> tcapi_sdk::Result<TimestampResult>,
+) -> tcapi_sdk::Result<TimestampResult> {
     let mut drained = TimestampResult {
         events: Vec::new(),
         reconciled: false,
@@ -210,7 +210,7 @@ pub fn drain_events(
 pub fn drain_connection(
     conn: &mut Connection,
     max_events: u16,
-) -> pochi_sdk::Result<TimestampResult> {
+) -> tcapi_sdk::Result<TimestampResult> {
     drain_events(max_events, |max| conn.ts_get(max))
 }
 
@@ -553,8 +553,8 @@ mod tests {
 
     #[test]
     fn drain_propagates_device_errors() {
-        let err = drain_events(10, |_| Err(pochi_sdk::SdkError::NotArmed)).unwrap_err();
-        assert!(matches!(err, pochi_sdk::SdkError::NotArmed));
+        let err = drain_events(10, |_| Err(tcapi_sdk::SdkError::NotArmed)).unwrap_err();
+        assert!(matches!(err, tcapi_sdk::SdkError::NotArmed));
     }
 
     #[test]

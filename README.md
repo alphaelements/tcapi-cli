@@ -1,6 +1,6 @@
-# Pochi CLI
+# Tcapi CLI
 
-Cross-platform command-line tool for Pochi-DIO — an RP2350-based high-speed digital I/O unit.
+Cross-platform command-line tool for Tcapi-DIO — an RP2350-based high-speed digital I/O unit.
 
 ## Features
 
@@ -17,37 +17,37 @@ Cross-platform command-line tool for Pochi-DIO — an RP2350-based high-speed di
 cargo install --path .
 
 # List connected devices
-pochi list
+tcapi list
 
 # Read input pins
-pochi read
+tcapi read
 
 # Get firmware version
-pochi version
+tcapi version
 
 # Send raw text command
-pochi raw "help"
+tcapi raw "help"
 ```
 
 ## Safety Functions
 
 ```bash
-pochi outputs reset              # every output to its default (def); there is no "alloff"
-pochi safety status              # watchdog, failsafe latch, usbsafe, exclusive groups
-pochi safety apply safety.toml   # excl, usbsafe, then wdog; verified by read-back
-pochi safety hold                # feed the watchdog until Ctrl+C (outputs unchanged)
-pochi wdog 500                   # 100-10000 ms, 0 / off disables
-pochi failsafe clear
-pochi excl set 0x0c 0x30         # pins of one group are never ON together
-pochi excl get
-pochi usbsafe on
-pochi rstinfo
+tcapi outputs reset              # every output to its default (def); there is no "alloff"
+tcapi safety status              # watchdog, failsafe latch, usbsafe, exclusive groups
+tcapi safety apply safety.toml   # excl, usbsafe, then wdog; verified by read-back
+tcapi safety hold                # feed the watchdog until Ctrl+C (outputs unchanged)
+tcapi wdog 500                   # 100-10000 ms, 0 / off disables
+tcapi failsafe clear
+tcapi excl set 0x0c 0x30         # pins of one group are never ON together
+tcapi excl get
+tcapi usbsafe on
+tcapi rstinfo
 ```
 
-Every `pochi` run connects and exits, so a watchdog enabled with `wdog` or
+Every `tcapi` run connects and exits, so a watchdog enabled with `wdog` or
 `safety apply` **trips the device once that process has ended** and the timeout has
 elapsed (outputs go to their defaults, the failsafe latch is set). Keep it fed with
-`pochi safety hold`. Settings are volatile: they are off after every restart.
+`tcapi safety hold`. Settings are volatile: they are off after every restart.
 
 Exit codes: 0 ok, 1 device error, 2 connection error, 3 argument error,
 4 `ERR FAILSAFE` (failsafe latch refuses the command), 5 `ERR EXCLUSIVE` (an exclusive
@@ -57,16 +57,16 @@ group would be violated; `--json` carries `kind`, `group` and `mask`).
 
 ```bash
 # Auto-detect (single device)
-pochi version
+tcapi version
 
 # By device number
-pochi -d 1 version
+tcapi -d 1 version
 
 # By UID (hardware-unique)
-pochi -u D5B305543EC559BF version
+tcapi -u D5B305543EC559BF version
 
 # By port path
-pochi -p /dev/ttyACM1 version
+tcapi -p /dev/ttyACM1 version
 ```
 
 ## Linux Setup (udev rules)
@@ -75,12 +75,12 @@ Without a rule the serial port belongs to `root:dialout`, ModemManager may probe
 it, and the kernel may suspend the USB link. Install the supplied rules once:
 
 ```bash
-sudo install -m 0644 packaging/udev/99-pochi.rules /etc/udev/rules.d/99-pochi.rules
+sudo install -m 0644 packaging/udev/99-tcapi.rules /etc/udev/rules.d/99-tcapi.rules
 sudo udevadm control --reload-rules && sudo udevadm trigger
 sudo usermod -aG dialout "$USER"      # only for sessions without a seat (SSH, services); log in again
 ```
 
-Unplug and re-plug the device afterwards. [`packaging/udev/99-pochi.rules`](packaging/udev/99-pochi.rules)
+Unplug and re-plug the device afterwards. [`packaging/udev/99-tcapi.rules`](packaging/udev/99-tcapi.rules)
 (VID `2e8a`, PID `1175`) does four things:
 
 | Setting | Why |
@@ -92,7 +92,7 @@ Unplug and re-plug the device afterwards. [`packaging/udev/99-pochi.rules`](pack
 
 A last rule gives `picotool` access to the device in BOOTSEL mode (PID `000f`).
 
-Check the syntax with `udevadm verify packaging/udev/99-pochi.rules`, and check the
+Check the syntax with `udevadm verify packaging/udev/99-tcapi.rules`, and check the
 result with `udevadm info -a -n /dev/ttyACM0 | grep -E 'idVendor|idProduct'` and
 `cat /sys/bus/usb/devices/<bus-port>/power/control` (it prints `on`).
 
@@ -103,7 +103,7 @@ device through **USB selective suspend** when the port is idle. Turn it off for 
 power plan in use: *Control Panel > Power Options > Change plan settings > Change
 advanced power settings > USB settings > USB selective suspend setting > Disabled*.
 On a laptop set both "On battery" and "Plugged in". If the device still drops out,
-open Device Manager, select the Pochi device under *Universal Serial Bus controllers*
+open Device Manager, select the Tcapi device under *Universal Serial Bus controllers*
 (and the USB Root Hub it hangs on), and clear *Allow the computer to turn off this
 device to save power* on the *Power Management* tab. Selective suspend does not change
 the outputs, but a watchdog (`wdog`) trips when the host stops answering for its
@@ -111,13 +111,13 @@ timeout.
 
 ## Firmware Update
 
-The firmware is updated over USB only (BOOTSEL, copy the UF2, check `pochi version`).
-See `docs/firmware-update.md` in the `pochi-tools` repository (also lists the files that ship with every release and how to verify them).
+The firmware is updated over USB only (BOOTSEL, copy the UF2, check `tcapi version`).
+See `docs/firmware-update.md` in the `tcapi-tools` repository (also lists the files that ship with every release and how to verify them).
 
 ## Documentation
 
-- **CLI Usage**: See the sections above and `pochi --help` / `pochi <subcommand> --help`
-- **Firmware Update**: See [`docs/firmware-update.md`](https://github.com/alphaelements/pochi-tools/blob/main/docs/firmware-update.md) in the pochi-tools repository
+- **CLI Usage**: See the sections above and `tcapi --help` / `tcapi <subcommand> --help`
+- **Firmware Update**: See [`docs/firmware-update.md`](https://github.com/alphaelements/tcapi-tools/blob/main/docs/firmware-update.md) in the tcapi-tools repository
 
 ## License
 
